@@ -13,6 +13,7 @@ const examplePrompts = [
   'When a GitHub PR is merged, post to Discord and create a Trello card',
   'When I get a new Twitter mention, log it to Google Sheets and send me an SMS',
   'When a new Shopify order comes in, update Airtable and send a Twilio SMS',
+  'When I like a YouTube video, get transcript and summarize it',
 ];
 
 const keywordMap: Record<string, string> = {
@@ -47,6 +48,20 @@ const keywordMap: Record<string, string> = {
   newsletter: 'mailchimp',
   youtube: 'youtube',
   video: 'youtube',
+  transcript: 'youtube',
+  liked: 'youtube',
+  captions: 'youtube',
+  summarize: 'ai-processing',
+  summary: 'ai-processing',
+  'mind map': 'ai-processing',
+  mindmap: 'ai-processing',
+  'top ideas': 'ai-processing',
+  ideas: 'ai-processing',
+  presentation: 'ai-processing',
+  deck: 'ai-processing',
+  slides: 'ai-processing',
+  notes: 'ai-processing',
+  digest: 'ai-processing',
   rss: 'rss',
   webhook: 'webhook',
   sheets: 'google-sheets',

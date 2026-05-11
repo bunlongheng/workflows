@@ -29,6 +29,11 @@ const config: Config = {
     "bg-gray-500",
     "bg-teal-600",
     "bg-sky-400",
+    "bg-emerald-600",
+    "bg-indigo-500",
+    "bg-purple-500",
+    "bg-cyan-600",
+    "bg-amber-600",
   ],
 };
 

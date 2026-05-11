@@ -5,8 +5,6 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  Controls,
-  MiniMap,
   addEdge,
   useNodesState,
   useEdgesState,
@@ -21,126 +19,12 @@ import '@xyflow/react/dist/style.css';
 import TriggerNode from './nodes/TriggerNode';
 import ActionNode from './nodes/ActionNode';
 import NodeConfigPanel from './panels/NodeConfigPanel';
-import AIBuilder from './AIBuilder';
+import CodePanel from './panels/CodePanel';
 import { integrations, Integration } from '@/data/integrations';
 
-const initialNodes: Node[] = [
-  // Flow 1: Gmail → Slack → Notion
-  {
-    id: 'trigger-1',
-    type: 'triggerNode',
-    position: { x: 80, y: 80 },
-    data: {
-      integrationId: 'gmail',
-      integrationName: 'Gmail',
-      icon: '📧',
-      color: 'bg-red-500',
-      eventLabel: 'New Email Received',
-      type: 'trigger',
-    },
-  },
-  {
-    id: 'action-1',
-    type: 'actionNode',
-    position: { x: 380, y: 80 },
-    data: {
-      integrationId: 'slack',
-      integrationName: 'Slack',
-      icon: '💬',
-      color: 'bg-purple-600',
-      eventLabel: 'Send Channel Message',
-      type: 'action',
-    },
-  },
-  {
-    id: 'action-2',
-    type: 'actionNode',
-    position: { x: 680, y: 80 },
-    data: {
-      integrationId: 'notion',
-      integrationName: 'Notion',
-      icon: '📝',
-      color: 'bg-gray-700',
-      eventLabel: 'Create Page',
-      type: 'action',
-    },
-  },
-  // Flow 2: GitHub → Discord → Trello
-  {
-    id: 'trigger-2',
-    type: 'triggerNode',
-    position: { x: 80, y: 280 },
-    data: {
-      integrationId: 'github',
-      integrationName: 'GitHub',
-      icon: '🐙',
-      color: 'bg-gray-800',
-      eventLabel: 'New PR Opened',
-      type: 'trigger',
-    },
-  },
-  {
-    id: 'action-3',
-    type: 'actionNode',
-    position: { x: 380, y: 280 },
-    data: {
-      integrationId: 'discord',
-      integrationName: 'Discord',
-      icon: '🎮',
-      color: 'bg-indigo-600',
-      eventLabel: 'Send Message',
-      type: 'action',
-    },
-  },
-  {
-    id: 'action-4',
-    type: 'actionNode',
-    position: { x: 680, y: 280 },
-    data: {
-      integrationId: 'trello',
-      integrationName: 'Trello',
-      icon: '📋',
-      color: 'bg-blue-600',
-      eventLabel: 'Create Card',
-      type: 'action',
-    },
-  },
-  // Flow 3: Stripe → Mailchimp
-  {
-    id: 'trigger-3',
-    type: 'triggerNode',
-    position: { x: 80, y: 480 },
-    data: {
-      integrationId: 'stripe',
-      integrationName: 'Stripe',
-      icon: '💳',
-      color: 'bg-violet-600',
-      eventLabel: 'New Payment',
-      type: 'trigger',
-    },
-  },
-  {
-    id: 'action-5',
-    type: 'actionNode',
-    position: { x: 380, y: 480 },
-    data: {
-      integrationId: 'mailchimp',
-      integrationName: 'Mailchimp',
-      icon: '🐒',
-      color: 'bg-yellow-400',
-      eventLabel: 'Add Subscriber',
-      type: 'action',
-    },
-  },
-];
+const initialNodes: Node[] = [];
 
-const initialEdges: Edge[] = [
-  { id: 'e1-2', source: 'trigger-1', target: 'action-1', animated: true, style: { stroke: '#6366f1', strokeWidth: 2 } },
-  { id: 'e2-3', source: 'action-1', target: 'action-2', animated: true, style: { stroke: '#6366f1', strokeWidth: 2 } },
-  { id: 'e4-5', source: 'trigger-2', target: 'action-3', animated: true, style: { stroke: '#6366f1', strokeWidth: 2 } },
-  { id: 'e5-6', source: 'action-3', target: 'action-4', animated: true, style: { stroke: '#6366f1', strokeWidth: 2 } },
-  { id: 'e7-8', source: 'trigger-3', target: 'action-5', animated: true, style: { stroke: '#6366f1', strokeWidth: 2 } },
-];
+const initialEdges: Edge[] = [];
 
 const nodeTypes = {
   triggerNode: TriggerNode,
@@ -279,23 +163,78 @@ function DropModal({ integration, onConfirm, onClose }: DropModalProps) {
 
 interface FlowCanvasInnerProps {
   onTriggerCountChange?: (count: number) => void;
+  onFlowNameChange?: (name: string) => void;
+  onSave?: (data: { name: string; trigger: Node | null; action: Node | null }) => void;
 }
 
-function FlowCanvasInner({ onTriggerCountChange }: FlowCanvasInnerProps) {
+function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: FlowCanvasInnerProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
+
+  // Cmd+S to save
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        const triggers = nodes.filter((n) => n.type === 'triggerNode');
+        const actions = nodes.filter((n) => n.type === 'actionNode');
+        if (triggers.length === 0 && actions.length === 0) return;
+        const triggerNames = triggers.map((t) => {
+          const integ = integrations.find((i) => i.id === t.data.integrationId);
+          return `${integ?.name || ''} ${String(t.data.eventLabel || '').replace(integ?.name || '', '').trim()}`;
+        });
+        const actionNames = actions.map((a) => {
+          const integ = integrations.find((i) => i.id === a.data.integrationId);
+          return integ?.name || '';
+        });
+        const name = [...triggerNames, ...actionNames].join(' > ');
+        onSave?.({ name, trigger: triggers[0] || null, action: actions[0] || null });
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [nodes, onSave]);
 
   useEffect(() => {
     const triggerCount = nodes.filter((n) => n.type === 'triggerNode').length;
     onTriggerCountChange?.(triggerCount);
-  }, [nodes, onTriggerCountChange]);
+
+    // Auto-name: "TriggerLabel > ActionLabel"
+    const triggers = nodes.filter((n) => n.type === 'triggerNode');
+    const actions = nodes.filter((n) => n.type === 'actionNode');
+    if (triggers.length > 0 || actions.length > 0) {
+      const parts: string[] = [];
+      for (const t of triggers) {
+        const integ = integrations.find((i) => i.id === t.data.integrationId);
+        parts.push(`${integ?.name || ''} ${t.data.eventLabel || ''}`);
+      }
+      for (const a of actions) {
+        const integ = integrations.find((i) => i.id === a.data.integrationId);
+        parts.push(`${integ?.name || ''} ${a.data.eventLabel || ''}`);
+      }
+      // Shorten: "YouTube Video Liked > Diagram Create Diagram" -> "YouTube Liked > Diagram"
+      const triggerNames = triggers.map((t) => {
+        const integ = integrations.find((i) => i.id === t.data.integrationId);
+        return `${integ?.name || ''} ${String(t.data.eventLabel || '').replace(integ?.name || '', '').trim()}`;
+      });
+      const actionNames = actions.map((a) => {
+        const integ = integrations.find((i) => i.id === a.data.integrationId);
+        return integ?.name || '';
+      });
+      const name = [...triggerNames, ...actionNames].join(' > ');
+      onFlowNameChange?.(name);
+    } else {
+      onFlowNameChange?.('');
+    }
+  }, [nodes, onTriggerCountChange, onFlowNameChange]);
   const [modal, setModal] = useState<{
     integration: Integration;
     position: { x: number; y: number };
   } | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [showCode, setShowCode] = useState(false);
 
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
   const handleSelectNode = useCallback(
@@ -322,6 +261,7 @@ function FlowCanvasInner({ onTriggerCountChange }: FlowCanvasInnerProps) {
           {
             ...params,
             animated: true,
+            type: 'smoothstep',
             style: { stroke: '#6366f1', strokeWidth: 2 },
           },
           eds
@@ -365,10 +305,7 @@ function FlowCanvasInner({ onTriggerCountChange }: FlowCanvasInnerProps) {
       const newNode: Node = {
         id: newNodeId,
         type: nodeType,
-        position: {
-          x: modal.position.x - 120,
-          y: modal.position.y - 60,
-        },
+        position: { x: 0, y: 0 }, // placeholder - will be repositioned
         data: {
           integrationId: modal.integration.id,
           eventId,
@@ -378,10 +315,52 @@ function FlowCanvasInner({ onTriggerCountChange }: FlowCanvasInnerProps) {
         },
       };
 
-      setNodes((nds) => [...nds, newNode]);
+      setNodes((nds) => {
+        const updated = [...nds, newNode];
+
+        // Auto-layout: triggers on left, actions on right, centered vertically
+        const NODE_W = 340;
+        const GAP = 120;
+        const triggers = updated.filter((n) => n.type === 'triggerNode');
+        const actions = updated.filter((n) => n.type === 'actionNode');
+        const allOrdered = [...triggers, ...actions];
+        const totalWidth = allOrdered.length * NODE_W + (allOrdered.length - 1) * GAP;
+        const startX = -totalWidth / 2;
+
+        allOrdered.forEach((node, i) => {
+          node.position = { x: startX + i * (NODE_W + GAP), y: 0 };
+        });
+
+        // Auto-connect: if exactly 1 trigger and 1 action, draw edge
+        if (triggers.length === 1 && actions.length === 1) {
+          const edgeExists = edges.some(
+            (e) => e.source === triggers[0].id && e.target === actions[0].id
+          );
+          if (!edgeExists) {
+            setEdges((eds) =>
+              addEdge(
+                {
+                  id: `edge-${triggers[0].id}-${actions[0].id}`,
+                  source: triggers[0].id,
+                  target: actions[0].id,
+                  animated: true,
+                  type: 'smoothstep',
+                  style: { stroke: '#6366f1', strokeWidth: 2 },
+                },
+                eds
+              )
+            );
+          }
+        }
+
+        // fitView after layout settles
+        setTimeout(() => fitView({ padding: 0.3, duration: 300 }), 50);
+
+        return updated;
+      });
       setModal(null);
     },
-    [modal, setNodes, handleDeleteNode, handleSelectNode]
+    [modal, setNodes, setEdges, edges, fitView, handleDeleteNode, handleSelectNode]
   );
 
   const handlePaneClick = useCallback(() => {
@@ -415,6 +394,7 @@ function FlowCanvasInner({ onTriggerCountChange }: FlowCanvasInnerProps) {
           style={{ background: '#0f0f0f' }}
           defaultEdgeOptions={{
             animated: true,
+            type: 'smoothstep',
             style: { stroke: '#6366f1', strokeWidth: 2 },
           }}
         >
@@ -423,24 +403,6 @@ function FlowCanvasInner({ onTriggerCountChange }: FlowCanvasInnerProps) {
             gap={24}
             size={1}
             color="#2a2a2a"
-          />
-          <Controls
-            style={{
-              background: '#1a1a1a',
-              border: '1px solid #333',
-              borderRadius: '8px',
-            }}
-          />
-          <MiniMap
-            style={{
-              background: '#1a1a1a',
-              border: '1px solid #333',
-              borderRadius: '8px',
-            }}
-            nodeColor={(n) => {
-              return n.type === 'triggerNode' ? '#22c55e' : '#6366f1';
-            }}
-            maskColor="rgba(0,0,0,0.6)"
           />
 
           {/* Empty state */}
@@ -473,8 +435,24 @@ function FlowCanvasInner({ onTriggerCountChange }: FlowCanvasInnerProps) {
         </ReactFlow>
 
         {/* AI Builder */}
-        <AIBuilder onAddNodes={handleAddAINodes} />
+
+        {/* Code toggle button */}
+        <button
+          onClick={() => setShowCode((v) => !v)}
+          className={`absolute bottom-4 right-4 z-10 px-3 py-1.5 rounded-lg text-xs font-mono font-semibold border transition-all ${
+            showCode
+              ? 'bg-amber-900/40 border-amber-700 text-amber-400'
+              : 'bg-[#1a1a1a] border-[#333] text-[#666] hover:text-[#ccc] hover:border-[#555]'
+          }`}
+        >
+          &lt;/&gt; Code
+        </button>
       </div>
+
+      {/* Code panel */}
+      {showCode && (
+        <CodePanel nodes={nodes} edges={edges} onClose={() => setShowCode(false)} />
+      )}
 
       {/* Config panel */}
       {selectedNode && (
@@ -500,12 +478,14 @@ function FlowCanvasInner({ onTriggerCountChange }: FlowCanvasInnerProps) {
 
 interface FlowCanvasProps {
   onTriggerCountChange?: (count: number) => void;
+  onFlowNameChange?: (name: string) => void;
+  onSave?: (data: { name: string; trigger: Node | null; action: Node | null }) => void;
 }
 
-export default function FlowCanvas({ onTriggerCountChange }: FlowCanvasProps) {
+export default function FlowCanvas({ onTriggerCountChange, onFlowNameChange, onSave }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
-      <FlowCanvasInner onTriggerCountChange={onTriggerCountChange} />
+      <FlowCanvasInner onTriggerCountChange={onTriggerCountChange} onFlowNameChange={onFlowNameChange} onSave={onSave} />
     </ReactFlowProvider>
   );
 }

@@ -60,6 +60,23 @@ function getConfigFields(integrationId: string, nodeType: string) {
       { label: 'Max Tokens', placeholder: '1000' },
       { label: 'Temperature', placeholder: '0.7' },
     ],
+    youtube: nodeType === 'triggerNode'
+      ? [
+          { label: 'Channel URL', placeholder: 'https://youtube.com/@channel' },
+          { label: 'Playlist Filter', placeholder: 'e.g. Watch Later, Favorites' },
+          { label: 'Keyword Filter', placeholder: 'e.g. programming, AI' },
+        ]
+      : [
+          { label: 'Video URL', placeholder: 'https://youtube.com/watch?v=...' },
+          { label: 'Language', placeholder: 'en (auto-detect if empty)' },
+          { label: 'Include Timestamps', placeholder: 'yes / no' },
+        ],
+    'ai-processing': [
+      { label: 'Output Format', placeholder: 'markdown / json / plain text' },
+      { label: 'Max Length', placeholder: 'e.g. 500 words, 10 bullet points' },
+      { label: 'Focus Topics', placeholder: 'e.g. key takeaways, action items' },
+      { label: 'Tone', placeholder: 'professional / casual / academic' },
+    ],
   };
 
   return configs[integrationId] || [
@@ -80,10 +97,9 @@ export default function NodeConfigPanel({ node, onClose, onDelete }: NodeConfigP
 
   return (
     <div
-      className="flex flex-col h-full"
+      className="flex flex-col h-full w-full sm:w-[300px] sm:min-w-[300px]"
       style={{
-        width: '300px',
-        minWidth: '300px',
+        maxWidth: '100vw',
         background: '#1a1a1a',
         borderLeft: '1px solid #2a2a2a',
       }}

@@ -41,7 +41,11 @@ export default function TriggerNode({ id, data, selected }: NodeProps) {
       {/* Header */}
       <div className={`${integration.color} px-3 py-2.5 flex items-center justify-between`}>
         <div className="flex items-center gap-2">
-          <span style={{ fontSize: '18px', lineHeight: 1 }}>{integration.icon}</span>
+          {integration.icon.startsWith('/') ? (
+            <img src={integration.icon} alt="" style={{ width: '18px', height: '18px' }} draggable={false} />
+          ) : (
+            <span style={{ fontSize: '18px', lineHeight: 1 }}>{integration.icon}</span>
+          )}
           <span className="text-white text-xs font-bold uppercase tracking-wider">Trigger</span>
         </div>
         <span className="bg-white/20 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full">

@@ -1,5 +1,5 @@
-import ClientLayout from '@/components/ClientLayout';
+import { redirect } from 'next/navigation';
 
 export default function Home() {
-  return <ClientLayout />;
+  redirect('/automations');
 }

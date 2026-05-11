@@ -1,3 +1,4 @@
 {
+  "framework": "nextjs",
   "ignoreCommand": "git log -1 --format=%s | grep -qE '^(chore|ci|test|docs):'"
 }
