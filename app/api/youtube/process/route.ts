@@ -157,42 +157,47 @@ Return JSON only (no markdown):
 async function postToStickies(title: string, videoId: string, description: string, channelName: string, result: { summary?: string; ideas?: string[]; topics?: string[] }) {
   const videoUrl = `https://youtube.com/watch?v=${videoId}`;
   const thumbnail = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
-
-  // Extract links from description
   const links = description.match(/https?:\/\/[^\s)]+/g) || [];
+  const uniqueLinks = [...new Set(links)].slice(0, 15);
 
-  const lines = [
-    `![${title}](${thumbnail})`,
-    '',
-    `## ${title}`,
-    `**Channel:** ${channelName}`,
-    `**Video:** ${videoUrl}`,
-    '',
-    '### Summary',
-    result.summary || 'No summary',
-    '',
-    '### Top Ideas',
-  ];
+  const topicsHTML = (result.topics || []).map(t =>
+    `<span style="display:inline-block;padding:2px 8px;margin:2px;border-radius:12px;background:#1e1e1e;color:#aaa;font-size:11px;">${t}</span>`
+  ).join('');
 
-  if (result.ideas?.length) {
-    result.ideas.forEach((idea: string) => lines.push(`- ${idea}`));
-  }
+  const ideasHTML = (result.ideas || []).map(idea =>
+    `<li style="margin-bottom:6px;line-height:1.5;">${idea}</li>`
+  ).join('');
 
-  if (result.topics?.length) {
-    lines.push('', `**Topics:** ${result.topics.join(', ')}`);
-  }
+  const linksHTML = uniqueLinks.length > 0
+    ? `<h3 style="margin:20px 0 8px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px;">Links</h3>
+<ul style="margin:0;padding-left:16px;font-size:13px;">${uniqueLinks.map(l => `<li style="margin-bottom:4px;"><a href="${l}" target="_blank" style="color:#6366f1;word-break:break-all;">${l}</a></li>`).join('')}</ul>`
+    : '';
 
-  // Add description
-  if (description) {
-    lines.push('', '### Description', description.slice(0, 2000));
-  }
+  const descHTML = description
+    ? `<h3 style="margin:20px 0 8px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px;">Description</h3>
+<p style="margin:0;line-height:1.6;color:#999;font-size:13px;white-space:pre-wrap;">${description.slice(0, 2000)}</p>`
+    : '';
 
-  // Add links from description
-  if (links.length > 0) {
-    lines.push('', '### Links');
-    const unique = [...new Set(links)];
-    unique.slice(0, 20).forEach((link: string) => lines.push(`- ${link}`));
-  }
+  const content = `<div style="font-family:-apple-system,system-ui,sans-serif;color:#e0e0e0;max-width:100%;overflow-wrap:break-word;">
+<a href="${videoUrl}" target="_blank" style="text-decoration:none;">
+  <img src="${thumbnail}" alt="${title}" style="width:100%;border-radius:8px;margin-bottom:12px;" />
+</a>
+
+<h2 style="margin:0 0 4px 0;font-size:18px;color:#fff;line-height:1.3;">${title}</h2>
+<p style="margin:0 0 2px;color:#888;font-size:12px;">${channelName}</p>
+<a href="${videoUrl}" target="_blank" style="color:#666;font-size:12px;text-decoration:none;">${videoUrl}</a>
+
+${topicsHTML ? `<div style="margin:12px 0;">${topicsHTML}</div>` : ''}
+
+<h3 style="margin:16px 0 8px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px;">Summary</h3>
+<p style="margin:0;line-height:1.6;color:#ccc;font-size:14px;">${result.summary || 'No summary available'}</p>
+
+${ideasHTML ? `<h3 style="margin:20px 0 8px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px;">Key Takeaways</h3>
+<ol style="margin:0;padding-left:20px;color:#ccc;font-size:14px;">${ideasHTML}</ol>` : ''}
+
+${descHTML}
+${linksHTML}
+</div>`;
 
   try {
     const res = await fetch(`${STICKIES_URL}/api/stickies/ext`, {
@@ -203,7 +208,7 @@ async function postToStickies(title: string, videoId: string, description: strin
       },
       body: JSON.stringify({
         title: `YT: ${title.slice(0, 50)}`,
-        content: lines.join('\n'),
+        content,
         type: 'markdown',
         folder_name: 'YouTube',
       }),

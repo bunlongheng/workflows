@@ -42,8 +42,8 @@ export default function ClientLayout() {
           trigger_integration_type: data.trigger.data.integrationId,
           action_type: actionType,
           action_integration_type: data.action.data.integrationId,
-          action_config: {},
-          condition: {},
+          action_config: (data.action.data as Record<string, unknown>).config || {},
+          condition: (data.trigger.data as Record<string, unknown>).config || {},
         }),
       });
       if (res.ok) {
@@ -102,7 +102,7 @@ export default function ClientLayout() {
         setToast({ message: `Failed to connect ${connection}`, type: 'error' });
       }
 
-      window.history.replaceState({}, '', '/');
+      window.history.replaceState({}, '', '/automations/new');
       setTimeout(() => setToast(null), 4000);
     }
   }, []);

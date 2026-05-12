@@ -63,12 +63,15 @@ export const integrations: Integration[] = [
     category: "Communication",
     triggers: [
       { id: "gmail-t1", label: "New Email Received", description: "Fires when a new email arrives in your inbox" },
-      { id: "gmail-t2", label: "New Email Matching Filter", description: "Fires when an email matches your filter criteria" },
+      { id: "gmail-t2", label: "Subject Match", description: "Fires when email subject contains a keyword" },
+      { id: "gmail-t3", label: "From Match", description: "Fires when email is from a specific sender" },
+      { id: "gmail-t4", label: "Body Match", description: "Fires when email body contains a keyword" },
+      { id: "gmail-t5", label: "Search Query Match", description: "Fires when Gmail search query finds new results" },
     ],
     actions: [
-      { id: "gmail-a1", label: "Send Email", description: "Send an email from your Gmail account" },
-      { id: "gmail-a2", label: "Create Draft", description: "Create a new email draft" },
-      { id: "gmail-a3", label: "Add Label", description: "Add a label to an email" },
+      { id: "gmail-a1", label: "Create Sticky", description: "Save email summary as a sticky note" },
+      { id: "gmail-a2", label: "Create Diagram", description: "Generate a diagram from email content" },
+      { id: "gmail-a3", label: "Create Mind Map", description: "Generate a mind map from email content" },
     ],
   },
   {
@@ -104,6 +107,23 @@ export const integrations: Integration[] = [
     ],
   },
   {
+    id: "hue",
+    name: "Philips Hue",
+    icon: "/icons/hue.svg",
+    color: "bg-orange-500",
+    category: "Smart Home",
+    triggers: [
+      { id: "hue-t1", label: "Motion Detected", description: "Fires when a Hue motion sensor detects movement" },
+      { id: "hue-t2", label: "Button Pressed", description: "Fires when a Hue smart button is pressed" },
+    ],
+    actions: [
+      { id: "hue-a1", label: "Flash Lights", description: "Flash lights in a room or group" },
+      { id: "hue-a2", label: "Set Scene", description: "Set a Hue scene in a room" },
+      { id: "hue-a3", label: "Toggle Lights", description: "Turn lights on or off" },
+      { id: "hue-a4", label: "Set Color", description: "Change light color in a group" },
+    ],
+  },
+  {
     id: "mindmap",
     name: "Mind Map",
     icon: "/icons/mindmap.svg",
@@ -118,53 +138,20 @@ export const integrations: Integration[] = [
     ],
   },
   {
-    id: "local-apps",
-    name: "Local Apps",
-    icon: "/icons/local-apps.svg",
-    color: "bg-cyan-600",
-    category: "Dev",
-    triggers: [
-      { id: "local-t1", label: "App Started", description: "Fires when a local app starts running" },
-      { id: "local-t2", label: "App Crashed", description: "Fires when a local app crashes or stops" },
-      { id: "local-t3", label: "Health Check Failed", description: "Fires when a health check returns non-200" },
-    ],
-    actions: [
-      { id: "local-a1", label: "Start App", description: "Start a local application" },
-      { id: "local-a2", label: "Restart App", description: "Restart a running application" },
-      { id: "local-a3", label: "Check Status", description: "Check health status of all local apps" },
-    ],
-  },
-  {
-    id: "claude-dashboard",
-    name: "Claude",
-    icon: "/icons/claude-dashboard.svg",
-    color: "bg-amber-600",
-    category: "Dev",
-    triggers: [
-      { id: "claude-t1", label: "Session Complete", description: "Fires when a Claude Code session completes" },
-      { id: "claude-t2", label: "New Conversation", description: "Fires when a new conversation starts" },
-    ],
-    actions: [
-      { id: "claude-a1", label: "Log Session", description: "Log session details to the dashboard" },
-      { id: "claude-a2", label: "Query History", description: "Search past conversation history" },
-    ],
-  },
-  // --- Supporting integrations ---
-  {
-    id: "ai-processing",
-    name: "AI Processing",
+    id: "pipeline",
+    name: "Pipeline",
     icon: "/icons/ai-processing.svg",
     color: "bg-emerald-600",
-    category: "Productivity",
+    category: "Core",
     triggers: [
-      { id: "ai-t1", label: "Processing Complete", description: "Fires when AI finishes processing content" },
+      { id: "pipeline-t1", label: "Processing Complete", description: "Fires when the pipeline finishes processing content" },
     ],
     actions: [
-      { id: "ai-a1", label: "Summarize Content", description: "Generate a concise summary from text or transcript" },
-      { id: "ai-a2", label: "Extract Top Ideas", description: "Pull out key insights and takeaways from content" },
-      { id: "ai-a3", label: "Generate Mind Map", description: "Create a structured mind map from content" },
-      { id: "ai-a4", label: "Create Presentation", description: "Turn content into slide deck outline" },
-      { id: "ai-a5", label: "Generate Notes", description: "Create structured study/reference notes" },
+      { id: "pipeline-a1", label: "Summarize Content", description: "Generate a concise summary from text or transcript" },
+      { id: "pipeline-a2", label: "Extract Top Ideas", description: "Pull out key insights and takeaways from content" },
+      { id: "pipeline-a3", label: "Generate Mind Map", description: "Create a structured mind map from content" },
+      { id: "pipeline-a4", label: "Generate Diagram", description: "Create a sequence diagram from content" },
+      { id: "pipeline-a5", label: "Create Sticky", description: "Save formatted HTML note to Stickies" },
     ],
   },
   {

@@ -31,6 +31,17 @@ interface LogEntry {
   via: string;
 }
 
+function timeAgo(date: string): string {
+  const diff = Date.now() - new Date(date).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 function getIcon(type: string): string {
   const icons: Record<string, string> = {
     youtube: '/icons/youtube.svg',
@@ -92,6 +103,7 @@ export default function AutomationDetailPage() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [processedIds, setProcessedIds] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<'likes' | 'logs'>('likes');
+  const [expandedLog, setExpandedLog] = useState<string | null>(null);
 
   // Toast state (Stickies-style)
   const [toast, setToast] = useState('');
@@ -124,6 +136,14 @@ export default function AutomationDetailPage() {
         setLogs(data.logs || []);
         if (data.automation?.trigger_type === 'video_liked') {
           fetchLikes();
+          // Derive processed IDs from THIS automation's logs
+          const loggedIds = (data.logs || []).map((log: LogEntry) => {
+            try {
+              const p = typeof log.trigger_payload === 'string' ? JSON.parse(log.trigger_payload) : log.trigger_payload;
+              return p?.videoId;
+            } catch { return null; }
+          }).filter(Boolean);
+          if (loggedIds.length) setProcessedIds(new Set(loggedIds));
         }
       })
       .finally(() => setLoading(false));
@@ -271,117 +291,72 @@ export default function AutomationDetailPage() {
       </header>
 
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        {/* Flow card */}
+        {/* Consolidated card */}
         <div className="rounded-xl border border-[#1e1e1e] p-4 sm:p-6 mb-6" style={{ background: '#141414' }}>
-          <div className="flex items-center gap-3 sm:gap-6">
-            {/* Trigger */}
+          {/* Top row: flow + status */}
+          <div className="flex items-center justify-between gap-3 mb-4">
             <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-              <div className={`w-9 h-9 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${getColor(automation.trigger_integration_type)}`}>
-                <img src={getIcon(automation.trigger_integration_type)} alt="" className="w-5 h-5 sm:w-6 sm:h-6" />
+              {/* Trigger icon */}
+              <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${getColor(automation.trigger_integration_type)}`}>
+                <img src={getIcon(automation.trigger_integration_type)} alt="" className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <div className="min-w-0">
-                <p className="text-[10px] text-green-400 font-bold uppercase tracking-wider">Trigger (IF)</p>
-                <p className="text-sm sm:text-base text-[#f0f0f0] font-semibold truncate">{automation.trigger_integration_name}</p>
-                <p className="text-[11px] sm:text-xs text-[#555] truncate">{automation.trigger_type.replace(/_/g, ' ')}</p>
-              </div>
-            </div>
-
-            <svg width="28" height="16" viewBox="0 0 28 16" fill="none" className="flex-shrink-0 sm:w-[40px]">
-              <path d="M0 8h22M18 3l5 5-5 5" stroke="#444" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-
-            {/* Action */}
-            <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-              <div className={`w-9 h-9 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${getColor(automation.action_integration_type)}`}>
-                <img src={getIcon(automation.action_integration_type)} alt="" className="w-5 h-5 sm:w-6 sm:h-6" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">Action (THEN)</p>
-                <p className="text-sm sm:text-base text-[#f0f0f0] font-semibold truncate">{automation.action_integration_name}</p>
-                <p className="text-[11px] sm:text-xs text-[#555] truncate">{automation.action_type.replace(/_/g, ' ')}</p>
+              <svg width="20" height="12" viewBox="0 0 20 12" fill="none" className="flex-shrink-0">
+                <path d="M0 6h14M10 1l5 5-5 5" stroke="#333" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              {/* Action icon */}
+              <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${getColor(automation.action_integration_type)}`}>
+                <img src={getIcon(automation.action_integration_type)} alt="" className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
             </div>
-          </div>
-        </div>
 
-        {/* Config */}
-        {automation.action_config && Object.keys(automation.action_config).length > 0 && (
-          <div className="rounded-xl border border-[#1e1e1e] p-4 sm:p-5 mb-6" style={{ background: '#141414' }}>
-            <p className="text-xs text-[#555] font-bold uppercase tracking-wider mb-3">Configuration</p>
-            <div className="space-y-2">
-              {Object.entries(automation.action_config).map(([key, value]) => (
-                <div key={key} className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-[#888] flex-shrink-0">{key}</span>
-                  <span className="text-xs text-[#ccc] font-mono bg-[#1a1a1a] px-2 py-0.5 rounded truncate">{value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Meta */}
-        <div className="rounded-xl border border-[#1e1e1e] p-4 sm:p-5 mb-6" style={{ background: '#141414' }}>
-          <p className="text-xs text-[#555] font-bold uppercase tracking-wider mb-3">Details</p>
-          <div className="space-y-2 text-xs">
-            <div className="flex justify-between gap-2">
-              <span className="text-[#888] flex-shrink-0">ID</span>
-              <span className="text-[#555] font-mono truncate">{automation.id}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-[#888]">Created</span>
-              <span className="text-[#ccc]">{new Date(automation.created_at).toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-[#888]">Updated</span>
-              <span className="text-[#ccc]">{new Date(automation.updated_at).toLocaleString()}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-8">
-          <button
-            onClick={handleToggle}
-            disabled={toggling}
-            className="flex items-center gap-2"
-          >
-            <div
-              className="relative w-10 h-[22px] rounded-full transition-colors duration-200"
-              style={{ background: automation.active ? '#22c55e' : '#333' }}
-            >
-              <div
-                className="absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform duration-200"
-                style={{ transform: automation.active ? 'translateX(20px)' : 'translateX(3px)' }}
-              />
-            </div>
-            <span className="text-xs text-[#888]">{automation.active ? 'Active' : 'Paused'}</span>
-          </button>
-
-          {!showConfirm ? (
+            {/* Active toggle */}
             <button
-              onClick={() => setShowConfirm(true)}
-              className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#1a1a1a] border border-[#333] text-[#888] hover:text-red-400 hover:border-red-900/50 hover:bg-red-950/20 transition-all"
+              onClick={handleToggle}
+              disabled={toggling}
+              className={`px-3 py-1 rounded-full text-[11px] font-semibold transition-colors ${
+                automation.active
+                  ? 'bg-green-900/30 text-green-400 border border-green-900/50 hover:bg-green-900/50'
+                  : 'bg-[#1a1a1a] text-[#555] border border-[#252525] hover:text-[#888]'
+              }`}
             >
-              Delete Automation
+              {automation.active ? 'Active' : 'Paused'}
             </button>
-          ) : (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-red-400">Are you sure?</span>
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="px-4 py-2 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-500 text-white transition-colors"
-              >
-                {deleting ? 'Deleting...' : 'Yes, Delete'}
-              </button>
-              <button
-                onClick={() => setShowConfirm(false)}
-                className="px-3 py-2 rounded-lg text-xs text-[#888] hover:text-[#ccc] transition-colors"
-              >
-                Cancel
-              </button>
+          </div>
+
+          {/* Name + description */}
+          <p className="text-[11px] text-[#555] mb-1">
+            {automation.trigger_integration_name} ({automation.trigger_type.replace(/_/g, ' ')}) &rarr; {automation.action_integration_name} ({automation.action_type.replace(/_/g, ' ')})
+          </p>
+
+          {/* Stats row */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-[11px] border-t border-[#1e1e1e] pt-3">
+            <span><span className="text-[#555]">Created</span> <span className="text-[#888]">{timeAgo(automation.created_at)}</span></span>
+            {logs.length > 0 && (
+              <span><span className="text-[#555]">Last run</span> <span className="text-[#888]">{timeAgo(logs[0].triggered_at)}</span></span>
+            )}
+            <span><span className="text-[#555]">Runs</span> <span className="text-[#ccc]">{logs.length}</span></span>
+            <div className="ml-auto">
+              {!showConfirm ? (
+                <button
+                  onClick={() => setShowConfirm(true)}
+                  className="text-[#333] hover:text-red-400 transition-colors p-1"
+                  title="Delete"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-red-400">Delete?</span>
+                  <button onClick={handleDelete} disabled={deleting} className="text-[10px] px-2 py-0.5 rounded bg-red-600 text-white hover:bg-red-500 transition-colors">
+                    {deleting ? '...' : 'Yes'}
+                  </button>
+                  <button onClick={() => setShowConfirm(false)} className="text-[10px] text-[#555] hover:text-[#ccc]">No</button>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
 
         {/* Tabs: Likes (YouTube only) + Logs */}
@@ -502,51 +477,84 @@ export default function AutomationDetailPage() {
                   const mindmapId = payload.mindmapId;
                   const diagramId = payload.diagramId;
                   const videoId = payload.videoId;
+                  const isExpanded = expandedLog === log.id;
+                  const thumbnail = videoId ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` : null;
 
                   return (
-                    <div
-                      key={log.id}
-                      className="flex items-center gap-2 sm:gap-4 px-3 sm:px-4 py-3 rounded-lg hover:bg-[#141414] transition-colors min-w-0"
-                    >
-                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                        log.result === 'success' || log.result === 'ok' ? 'bg-green-500' : 'bg-red-500'
-                      }`} />
-                      <span className="text-[10px] sm:text-[11px] text-[#555] w-28 sm:w-36 flex-shrink-0">
-                        {new Date(log.triggered_at).toLocaleString()}
-                      </span>
-                      {log.result === 'error' && (
-                        <span className="text-[10px] sm:text-[11px] font-medium w-14 sm:w-16 flex-shrink-0 text-red-400">
-                          {log.result}
+                    <div key={log.id} className="rounded-lg overflow-hidden" style={{ background: isExpanded ? '#141414' : 'transparent' }}>
+                      {/* Collapsed row */}
+                      <div
+                        onClick={() => setExpandedLog(isExpanded ? null : log.id)}
+                        className="flex items-center gap-2 sm:gap-4 px-3 sm:px-4 py-3 rounded-lg hover:bg-[#141414] transition-colors min-w-0 cursor-pointer"
+                      >
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                          log.result === 'success' || log.result === 'ok' ? 'bg-green-500' : 'bg-red-500'
+                        }`} />
+                        <span className="text-[10px] sm:text-[11px] text-[#555] w-28 sm:w-36 flex-shrink-0">
+                          {new Date(log.triggered_at).toLocaleString()}
                         </span>
-                      )}
-                      <span className="text-[10px] sm:text-[11px] text-[#888] truncate flex-1 min-w-0">
-                        {videoTitle || log.detail || '-'}
-                      </span>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        {videoId && (
-                          <a href={`https://youtube.com/watch?v=${videoId}`} target="_blank" rel="noopener noreferrer"
-                            className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors">
-                            YT
-                          </a>
-                        )}
-                        {mindmapId && (
-                          <a href={`https://mindmaps-bheng.vercel.app/?id=${mindmapId}`} target="_blank" rel="noopener noreferrer"
-                            className="text-[10px] px-1.5 py-0.5 rounded bg-purple-900/30 text-purple-400 hover:bg-purple-900/50 transition-colors">
-                            Mind Map
-                          </a>
-                        )}
-                        {diagramId && (
-                          <a href={`https://diagrams-bheng.vercel.app/?id=${diagramId}`} target="_blank" rel="noopener noreferrer"
-                            className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-900/30 text-cyan-400 hover:bg-cyan-900/50 transition-colors">
-                            Diagram
-                          </a>
-                        )}
-                        {log.via && (
-                          <span className="text-[10px] text-[#444] bg-[#1a1a1a] px-1.5 py-0.5 rounded hidden sm:inline">
-                            {log.via}
-                          </span>
-                        )}
+                        <span className="text-[10px] sm:text-[11px] text-[#888] truncate flex-1 min-w-0">
+                          {videoTitle || log.detail || '-'}
+                        </span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"
+                          className={`flex-shrink-0 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>
+                          <path d="M6 9l6 6 6-6" />
+                        </svg>
                       </div>
+
+                      {/* Expanded detail */}
+                      {isExpanded && (
+                        <div className="px-4 pb-4 pt-1 space-y-3">
+                          {/* Thumbnail + title */}
+                          {thumbnail && (
+                            <div className="flex gap-3">
+                              <a href={`https://youtube.com/watch?v=${videoId}`} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
+                                <img src={thumbnail} alt="" className="rounded" style={{ width: '120px', height: '68px', objectFit: 'cover' }} />
+                              </a>
+                              <div className="min-w-0">
+                                <a href={`https://youtube.com/watch?v=${videoId}`} target="_blank" rel="noopener noreferrer"
+                                  className="text-[13px] font-medium text-[#f0f0f0] hover:text-indigo-400 transition-colors line-clamp-2">
+                                  {videoTitle}
+                                </a>
+                                <p className="text-[11px] text-[#555] mt-1">{new Date(log.triggered_at).toLocaleString()}</p>
+                                {log.via && <p className="text-[10px] text-[#444] mt-0.5">via {log.via}</p>}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Summary */}
+                          {log.detail && (
+                            <p className="text-[12px] text-[#888] leading-relaxed">{log.detail}</p>
+                          )}
+
+                          {/* Links - only show what's relevant to this automation's action */}
+                          <div className="flex flex-wrap gap-2">
+                            {videoId && (
+                              <a href={`https://youtube.com/watch?v=${videoId}`} target="_blank" rel="noopener noreferrer"
+                                className="text-[11px] px-3 py-1.5 rounded-lg bg-red-900/20 text-red-400 hover:bg-red-900/40 transition-colors flex items-center gap-1.5">
+                                <img src="/icons/youtube.svg" alt="" className="w-3.5 h-3.5" /> YouTube Video
+                              </a>
+                            )}
+                            {mindmapId && automation.action_integration_type === 'mindmap' && (
+                              <a href={`https://mindmaps-bheng.vercel.app/?id=${mindmapId}`} target="_blank" rel="noopener noreferrer"
+                                className="text-[11px] px-3 py-1.5 rounded-lg bg-purple-900/20 text-purple-400 hover:bg-purple-900/40 transition-colors flex items-center gap-1.5">
+                                <img src="/icons/mindmap.svg" alt="" className="w-3.5 h-3.5" /> Mind Map
+                              </a>
+                            )}
+                            {diagramId && automation.action_integration_type === 'diagram' && (
+                              <a href={`https://diagrams-bheng.vercel.app/?id=${diagramId}`} target="_blank" rel="noopener noreferrer"
+                                className="text-[11px] px-3 py-1.5 rounded-lg bg-teal-900/20 text-teal-400 hover:bg-teal-900/40 transition-colors flex items-center gap-1.5">
+                                <img src="/icons/diagram.svg" alt="" className="w-3.5 h-3.5" /> Diagram
+                              </a>
+                            )}
+                            {automation.action_integration_type === 'stickies_api' && (
+                              <span className="text-[11px] px-3 py-1.5 rounded-lg bg-yellow-900/20 text-yellow-400 flex items-center gap-1.5">
+                                <img src="/icons/stickies.svg" alt="" className="w-3.5 h-3.5" /> Stickies
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

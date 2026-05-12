@@ -71,6 +71,91 @@ app.post('/api/youtube/connect', (req, res) => {
   res.json({ success: true, message: `Connected as ${accountName}` });
 });
 
+// --- Gmail ---
+const GMAIL_TOKEN_FILE = './data/gmail-token.json';
+
+app.post('/api/gmail/connect', (req, res) => {
+  const { access_token, refresh_token, expires_in, accountEmail } = req.body;
+  if (!access_token) return res.status(400).json({ error: 'access_token required' });
+
+  const tokenData = { access_token, refresh_token, expires_in, accountEmail, saved_at: new Date().toISOString() };
+  if (!fs.existsSync('./data')) fs.mkdirSync('./data', { recursive: true });
+  fs.writeFileSync(GMAIL_TOKEN_FILE, JSON.stringify(tokenData, null, 2));
+  console.log(`[gmail] Connected: ${accountEmail}`);
+  res.json({ success: true });
+});
+
+app.post('/api/gmail/disconnect', (req, res) => {
+  try { fs.unlinkSync(GMAIL_TOKEN_FILE); } catch {}
+  console.log('[gmail] Disconnected');
+  res.json({ success: true });
+});
+
+// Gmail search - check for new emails matching a query
+app.get('/api/gmail/search', async (req, res) => {
+  const query = req.query.q || '';
+  try {
+    const token = JSON.parse(fs.readFileSync(GMAIL_TOKEN_FILE, 'utf-8'));
+    if (!token.access_token) return res.status(401).json({ error: 'No Gmail token' });
+
+    // Refresh if needed
+    let accessToken = token.access_token;
+    const savedAt = new Date(token.saved_at).getTime();
+    const expiresIn = (token.expires_in || 3600) * 1000;
+    if (Date.now() - savedAt > expiresIn - 60000) {
+      const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: process.env.GOOGLE_CLIENT_ID,
+          client_secret: process.env.GOOGLE_CLIENT_SECRET,
+          refresh_token: token.refresh_token,
+          grant_type: 'refresh_token',
+        }),
+      });
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json();
+        accessToken = refreshData.access_token;
+        token.access_token = accessToken;
+        token.saved_at = new Date().toISOString();
+        fs.writeFileSync(GMAIL_TOKEN_FILE, JSON.stringify(token, null, 2));
+      }
+    }
+
+    const gmailRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=10`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!gmailRes.ok) return res.status(gmailRes.status).json({ error: 'Gmail API error' });
+
+    const data = await gmailRes.json();
+    const messages = [];
+
+    for (const msg of (data.messages || []).slice(0, 5)) {
+      const detail = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (detail.ok) {
+        const d = await detail.json();
+        const headers = d.payload?.headers || [];
+        messages.push({
+          id: msg.id,
+          threadId: msg.threadId,
+          subject: headers.find(h => h.name === 'Subject')?.value || '',
+          from: headers.find(h => h.name === 'From')?.value || '',
+          date: headers.find(h => h.name === 'Date')?.value || '',
+          snippet: d.snippet || '',
+        });
+      }
+    }
+
+    res.json({ messages, total: data.resultSizeEstimate || 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Disconnect YouTube
 app.post('/api/youtube/disconnect', (req, res) => {
   try {
@@ -139,8 +224,10 @@ app.get('/api/automations/list', async (req, res) => {
       SELECT
         a.id, a.name, a.trigger_type, a.action_type, a.active, a.action_config,
         a.created_at, a.updated_at,
-        ti.name as trigger_integration_name, ti.type as trigger_integration_type,
-        ai.name as action_integration_name, ai.type as action_integration_type,
+        COALESCE(ti.name, a.trigger_integration_type) as trigger_integration_name,
+        COALESCE(ti.type, a.trigger_integration_type) as trigger_integration_type,
+        COALESCE(ai.name, a.action_integration_type) as action_integration_name,
+        COALESCE(ai.type, a.action_integration_type) as action_integration_type,
         (SELECT count(*) FROM automation_logs WHERE automation_id = a.id) as total_runs,
         (SELECT count(*) FROM automation_logs WHERE automation_id = a.id AND result IN ('success', 'ok')) as success_runs,
         (SELECT triggered_at FROM automation_logs WHERE automation_id = a.id ORDER BY triggered_at DESC LIMIT 1) as last_run
@@ -161,8 +248,11 @@ app.get('/api/automations/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const autoResult = await pool.query(`
-      SELECT a.*, ti.name as trigger_integration_name, ti.type as trigger_integration_type,
-        ai.name as action_integration_name, ai.type as action_integration_type
+      SELECT a.*,
+        COALESCE(ti.name, a.trigger_integration_type) as trigger_integration_name,
+        COALESCE(ti.type, a.trigger_integration_type) as trigger_integration_type,
+        COALESCE(ai.name, a.action_integration_type) as action_integration_name,
+        COALESCE(ai.type, a.action_integration_type) as action_integration_type
       FROM automations a
       LEFT JOIN integrations ti ON a.trigger_integration_id = ti.id
       LEFT JOIN integrations ai ON a.action_integration_id = ai.id
@@ -216,23 +306,26 @@ app.post('/api/automations', async (req, res) => {
     if (!name || !trigger_type || !action_type) {
       return res.status(400).json({ error: 'name, trigger_type, action_type required' });
     }
-    // Look up integration UUIDs by type
+
+    // Look up integration UUIDs by type (best effort)
     const triggerInteg = trigger_integration_type
-      ? await pool.query('SELECT id FROM integrations WHERE type = $1 LIMIT 1', [trigger_integration_type])
+      ? await pool.query('SELECT id FROM integrations WHERE type = $1 LIMIT 1', [trigger_integration_type]).catch(() => ({ rows: [] }))
       : { rows: [] };
     const actionInteg = action_integration_type
-      ? await pool.query('SELECT id FROM integrations WHERE type = $1 LIMIT 1', [action_integration_type])
+      ? await pool.query('SELECT id FROM integrations WHERE type = $1 LIMIT 1', [action_integration_type]).catch(() => ({ rows: [] }))
       : { rows: [] };
 
     const result = await pool.query(
-      `INSERT INTO automations (name, trigger_type, trigger_integration_id, action_type, action_integration_id, action_config, condition)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      `INSERT INTO automations (name, trigger_type, trigger_integration_id, trigger_integration_type, action_type, action_integration_id, action_integration_type, action_config, condition)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
       [
         name,
         trigger_type,
         triggerInteg.rows[0]?.id || null,
+        trigger_integration_type || null,
         action_type,
         actionInteg.rows[0]?.id || null,
+        action_integration_type || null,
         action_config || {},
         condition || {},
       ]
@@ -278,6 +371,13 @@ app.post('/api/youtube/process', async (req, res) => {
   }
 });
 
+// Processed video IDs
+app.get('/api/youtube/processed', (req, res) => {
+  const history = getHistory();
+  const ids = history.map(h => h.videoId);
+  res.json({ ids });
+});
+
 // Status endpoint
 app.get('/api/youtube/status', (req, res) => {
   const history = getHistory();
@@ -310,6 +410,22 @@ async function migrate() {
     )
   `);
   console.log('[migrate] connections table ready');
+
+  // Add integration type columns to automations
+  await pool.query(`ALTER TABLE automations ADD COLUMN IF NOT EXISTS trigger_integration_type TEXT`);
+  await pool.query(`ALTER TABLE automations ADD COLUMN IF NOT EXISTS action_integration_type TEXT`);
+
+  // Backfill from integrations join
+  await pool.query(`
+    UPDATE automations a SET
+      trigger_integration_type = COALESCE(a.trigger_integration_type, ti.type),
+      action_integration_type = COALESCE(a.action_integration_type, ai.type)
+    FROM automations a2
+    LEFT JOIN integrations ti ON a2.trigger_integration_id = ti.id
+    LEFT JOIN integrations ai ON a2.action_integration_id = ai.id
+    WHERE a.id = a2.id AND (a.trigger_integration_type IS NULL OR a.action_integration_type IS NULL)
+  `);
+  console.log('[migrate] automation integration types ready');
 }
 
 // GET /api/connections - list all

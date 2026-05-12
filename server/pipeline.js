@@ -28,36 +28,36 @@ function getOAuthToken() {
 export async function processVideo(videoId) {
   console.log(`[pipeline] Processing video: ${videoId}`);
 
-  // Step 1: Get video title (using OAuth or fallback)
-  const title = await getVideoTitle(videoId);
+  // Step 1: Get video metadata (title, channel, description)
+  const meta = await getVideoMeta(videoId);
 
   // Step 2: Get transcript
   const transcript = await getTranscript(videoId);
   if (!transcript) {
     console.warn(`[pipeline] No transcript available for ${videoId}`);
-    markProcessed(videoId, title, { summary: 'No transcript available' });
-    return { videoId, title, error: 'No transcript available' };
+    markProcessed(videoId, meta.title, { summary: 'No transcript available' });
+    return { videoId, title: meta.title, error: 'No transcript available' };
   }
 
   console.log(`[pipeline] Transcript length: ${transcript.length} chars`);
 
   // Step 3: AI Processing
-  const result = await aiProcess(title, transcript);
+  const result = await aiProcess(meta.title, transcript);
 
   // Step 4: Deliver to Stickies
-  await deliverOutput(videoId, title, result);
+  await deliverOutput(videoId, meta, result);
 
   // Step 5: Generate Mind Map
-  await generateMindMap(title, videoId, result);
+  await generateMindMap(meta.title, videoId, result);
 
   // Step 6: Generate Diagram
-  await generateDiagram(title, videoId, result);
+  await generateDiagram(meta.title, videoId, result);
 
   // Step 7: Mark as processed
-  markProcessed(videoId, title, result);
+  markProcessed(videoId, meta.title, result);
 
-  console.log(`[pipeline] Done: ${title}`);
-  return { videoId, title, ...result };
+  console.log(`[pipeline] Done: ${meta.title}`);
+  return { videoId, title: meta.title, ...result };
 }
 
 async function getTranscript(videoId) {
@@ -135,8 +135,8 @@ function parseTimedTextXml(xml) {
   return joined || null;
 }
 
-async function getVideoTitle(videoId) {
-  // Try YouTube API with OAuth first
+async function getVideoMeta(videoId) {
+  // Try YouTube API with OAuth first - gets title, channel, description
   const token = getOAuthToken();
   if (token?.access_token) {
     try {
@@ -146,19 +146,25 @@ async function getVideoTitle(videoId) {
       );
       if (res.ok) {
         const data = await res.json();
-        const title = data.items?.[0]?.snippet?.title;
-        if (title) return title;
+        const snippet = data.items?.[0]?.snippet;
+        if (snippet?.title) {
+          return {
+            title: snippet.title,
+            channel: snippet.channelTitle || '',
+            description: snippet.description || '',
+          };
+        }
       }
     } catch {}
   }
 
-  // Fallback to noembed
+  // Fallback to noembed (title only)
   try {
     const res = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`);
     const data = await res.json();
-    return data.title || `Video ${videoId}`;
+    return { title: data.title || `Video ${videoId}`, channel: data.author_name || '', description: '' };
   } catch {
-    return `Video ${videoId}`;
+    return { title: `Video ${videoId}`, channel: '', description: '' };
   }
 }
 
@@ -218,17 +224,18 @@ Respond ONLY with valid JSON, no markdown.`,
 }
 
 const YOUTUBE_FOLDER_ID = 'e28dfc1d-e1bb-431f-bb54-b27b9f595704';
-const DEFAULT_USER_ID = '47a18fff-a0c4-4f18-b0f0-40821c18793d';
+const STICKIES_USER_ID = '47a18fff-a0c4-4f18-b0f0-40821c18793d';
+const DIAGRAMS_USER_ID = '731ace87-64e5-44db-bf2a-82265f06f4d9';
 
-async function deliverOutput(videoId, title, result) {
-  const content = formatAsMarkdown(title, videoId, result);
+async function deliverOutput(videoId, meta, result) {
+  const content = formatAsHTML(meta, videoId, result);
 
   // Write directly to stickies table in Postgres
   try {
     await pool.query(
       `INSERT INTO stickies (title, content, folder_name, folder_id, folder_color, type, icon, user_id)
        VALUES ($1, $2, 'YouTube', $3, '#FF3B30', 'markdown', '📺', $4)`,
-      [`YT: ${title.slice(0, 50)}`, content, YOUTUBE_FOLDER_ID, DEFAULT_USER_ID]
+      [`YT: ${meta.title.slice(0, 50)}`, content, YOUTUBE_FOLDER_ID, STICKIES_USER_ID]
     );
     console.log(`[output] Saved to Stickies DB: ${title}`);
   } catch (err) {
@@ -237,29 +244,56 @@ async function deliverOutput(videoId, title, result) {
 
   // Also save to local file as backup
   if (!fs.existsSync('./data/outputs')) fs.mkdirSync('./data/outputs', { recursive: true });
-  fs.writeFileSync(`./data/outputs/${videoId}.md`, content);
+  fs.writeFileSync(`./data/outputs/${videoId}.html`, content);
 }
 
-function formatAsMarkdown(title, videoId, result) {
-  const lines = [
-    `## ${title}`,
-    `https://youtube.com/watch?v=${videoId}`,
-    '',
-    '### Summary',
-    result.summary || 'No summary available',
-    '',
-    '### Top Ideas',
-  ];
+function formatAsHTML(meta, videoId, result) {
+  const { title, channel, description } = meta;
+  const thumbnail = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
+  const url = `https://youtube.com/watch?v=${videoId}`;
 
-  if (result.ideas?.length) {
-    result.ideas.forEach((idea) => lines.push(`- ${idea}`));
-  }
+  const topicsHTML = (result.topics || []).map(t =>
+    `<span style="display:inline-block;padding:2px 8px;margin:2px;border-radius:12px;background:#1e1e1e;color:#aaa;font-size:11px;">${t}</span>`
+  ).join('');
 
-  if (result.topics?.length) {
-    lines.push('', `**Topics:** ${result.topics.join(', ')}`);
-  }
+  const ideasHTML = (result.ideas || []).map(idea =>
+    `<li style="margin-bottom:6px;line-height:1.5;">${idea}</li>`
+  ).join('');
 
-  return lines.join('\n');
+  // Extract links from description
+  const links = (description || '').match(/https?:\/\/[^\s)]+/g) || [];
+  const uniqueLinks = [...new Set(links)].slice(0, 15);
+
+  const linksHTML = uniqueLinks.length > 0
+    ? `<h3 style="margin:20px 0 8px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px;">Links</h3>
+<ul style="margin:0;padding-left:16px;font-size:13px;">${uniqueLinks.map(l => `<li style="margin-bottom:4px;"><a href="${l}" target="_blank" style="color:#6366f1;word-break:break-all;">${l}</a></li>`).join('')}</ul>`
+    : '';
+
+  const descHTML = description
+    ? `<h3 style="margin:20px 0 8px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px;">Description</h3>
+<p style="margin:0;line-height:1.6;color:#999;font-size:13px;white-space:pre-wrap;">${description.slice(0, 2000)}</p>`
+    : '';
+
+  return `<div style="font-family:-apple-system,system-ui,sans-serif;color:#e0e0e0;max-width:100%;overflow-wrap:break-word;">
+<a href="${url}" target="_blank" style="text-decoration:none;">
+  <img src="${thumbnail}" alt="${title}" style="width:100%;border-radius:8px;margin-bottom:12px;" />
+</a>
+
+<h2 style="margin:0 0 4px 0;font-size:18px;color:#fff;line-height:1.3;">${title}</h2>
+${channel ? `<p style="margin:0 0 2px;color:#888;font-size:12px;">${channel}</p>` : ''}
+<a href="${url}" target="_blank" style="color:#666;font-size:12px;text-decoration:none;">${url}</a>
+
+${topicsHTML ? `<div style="margin:12px 0;">${topicsHTML}</div>` : ''}
+
+<h3 style="margin:16px 0 8px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px;">Summary</h3>
+<p style="margin:0;line-height:1.6;color:#ccc;font-size:14px;">${result.summary || 'No summary available'}</p>
+
+${ideasHTML ? `<h3 style="margin:20px 0 8px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px;">Key Takeaways</h3>
+<ol style="margin:0;padding-left:20px;color:#ccc;font-size:14px;">${ideasHTML}</ol>` : ''}
+
+${descHTML}
+${linksHTML}
+</div>`;
 }
 
 const BRANCH_COLORS = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#ec4899', '#14b8a6'];
@@ -334,7 +368,7 @@ async function generateMindMap(title, videoId, result) {
         `YT: ${title.slice(0, 50)}`,
         JSON.stringify(nodes),
         result.topics || [],
-        DEFAULT_USER_ID,
+        DIAGRAMS_USER_ID,
       ]
     );
 
@@ -395,7 +429,7 @@ Return ONLY valid Mermaid syntax starting with "sequenceDiagram". Keep it under 
     const dgResult = await pool.query(
       `INSERT INTO diagrams (user_id, title, code, diagram_type, tags)
        VALUES ($1, $2, $3, 'sequence', $4) RETURNING id`,
-      [DEFAULT_USER_ID, `YT: ${title.slice(0, 50)}`, code, result.topics || []]
+      [DIAGRAMS_USER_ID, `YT: ${title.slice(0, 50)}`, code, result.topics || []]
     );
 
     const diagramId = dgResult.rows[0]?.id;

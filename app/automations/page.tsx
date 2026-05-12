@@ -167,23 +167,14 @@ export default function AutomationsPage() {
                       </div>
                     </div>
 
-                    {/* Toggle switch */}
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleToggle(auto.id, auto.active); }}
-                      disabled={toggling === auto.id}
-                      className="flex items-center gap-2 flex-shrink-0"
-                    >
-                      <span className="text-[10px] text-[#555]">{auto.active ? 'On' : 'Off'}</span>
-                      <div
-                        className="relative w-9 h-5 rounded-full transition-colors duration-200"
-                        style={{ background: auto.active ? '#22c55e' : '#333' }}
-                      >
-                        <div
-                          className="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200"
-                          style={{ transform: auto.active ? 'translateX(18px)' : 'translateX(2px)' }}
-                        />
-                      </div>
-                    </button>
+                    {/* Status indicator */}
+                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-semibold flex-shrink-0 ${
+                      auto.active
+                        ? 'bg-green-900/30 text-green-400 border border-green-900/50'
+                        : 'bg-[#1a1a1a] text-[#555] border border-[#252525]'
+                    }`}>
+                      {auto.active ? 'Active' : 'Paused'}
+                    </span>
                   </div>
 
                   {/* Name */}

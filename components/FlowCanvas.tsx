@@ -18,6 +18,7 @@ import '@xyflow/react/dist/style.css';
 
 import TriggerNode from './nodes/TriggerNode';
 import ActionNode from './nodes/ActionNode';
+import GradientEdge from './edges/GradientEdge';
 import NodeConfigPanel from './panels/NodeConfigPanel';
 import CodePanel from './panels/CodePanel';
 import { integrations, Integration } from '@/data/integrations';
@@ -29,6 +30,10 @@ const initialEdges: Edge[] = [];
 const nodeTypes = {
   triggerNode: TriggerNode,
   actionNode: ActionNode,
+};
+
+const edgeTypes = {
+  gradient: GradientEdge,
 };
 
 let nodeIdCounter = 1;
@@ -261,8 +266,7 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
           {
             ...params,
             animated: true,
-            type: 'smoothstep',
-            style: { stroke: '#6366f1', strokeWidth: 2 },
+            type: 'gradient',
           },
           eds
         )
@@ -358,6 +362,8 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
 
         return updated;
       });
+      // Auto-open config panel for the new node
+      setSelectedNode(newNode);
       setModal(null);
     },
     [modal, setNodes, setEdges, edges, fitView, handleDeleteNode, handleSelectNode]
@@ -389,13 +395,13 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
           onDrop={onDrop}
           onPaneClick={handlePaneClick}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           fitView
           fitViewOptions={{ padding: 0.2 }}
           style={{ background: '#0f0f0f' }}
           defaultEdgeOptions={{
             animated: true,
-            type: 'smoothstep',
-            style: { stroke: '#6366f1', strokeWidth: 2 },
+            type: 'gradient',
           }}
         >
           <Background
@@ -460,6 +466,12 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
           node={selectedNode}
           onClose={() => setSelectedNode(null)}
           onDelete={handleDeleteNode}
+          onUpdateConfig={(nodeId, config) => {
+            setNodes((nds) => nds.map((n) =>
+              n.id === nodeId ? { ...n, data: { ...n.data, config } } : n
+            ));
+            setTimeout(() => fitView({ padding: 0.3, duration: 300 }), 50);
+          }}
         />
       )}
 

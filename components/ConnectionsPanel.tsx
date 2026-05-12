@@ -13,7 +13,7 @@ interface ConnectionInfo {
   scopes?: string[];
 }
 
-const CONNECTABLE_IDS = ['youtube', 'gmail', 'slack', 'github', 'discord', 'notion', 'google-calendar', 'google-sheets', 'spotify', 'stripe', 'trello', 'dropbox', 'ai-processing', 'stickies', 'hue', 'diagram', 'mindmap', 'local-apps', 'claude-dashboard'];
+const CONNECTABLE_IDS = ['youtube', 'gmail', 'slack', 'github', 'discord', 'notion', 'google-calendar', 'google-sheets', 'spotify', 'stripe', 'trello', 'dropbox', 'pipeline', 'stickies', 'hue', 'diagram', 'mindmap', 'webhook'];
 
 const OAUTH_INTEGRATIONS = ['youtube', 'gmail', 'google-calendar', 'spotify', 'github', 'slack', 'discord'];
 

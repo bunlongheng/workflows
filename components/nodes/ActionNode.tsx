@@ -8,6 +8,7 @@ export type ActionNodeData = {
   integrationId: string;
   eventId: string;
   eventLabel: string;
+  config?: Record<string, string>;
   onDelete: (id: string) => void;
   onSelect: (id: string) => void;
 };
@@ -30,7 +31,7 @@ export default function ActionNode({ id, data, selected }: NodeProps) {
         borderRadius: '12px',
         overflow: 'hidden',
         boxShadow: selected
-          ? '0 0 0 2px #6366f1, 0 8px 32px rgba(99,102,241,0.3)'
+          ? '0 0 0 2px #ffffff, 0 8px 32px rgba(255,255,255,0.15)'
           : hovered
           ? '0 4px 24px rgba(0,0,0,0.5)'
           : '0 2px 12px rgba(0,0,0,0.4)',
@@ -71,6 +72,16 @@ export default function ActionNode({ id, data, selected }: NodeProps) {
         <p className="text-[#f0f0f0] text-sm font-semibold leading-tight">
           {nodeData.eventLabel}
         </p>
+        {nodeData.config && Object.entries(nodeData.config).some(([, v]) => v) && (
+          <div className="mt-2 space-y-0.5">
+            {Object.entries(nodeData.config).filter(([, v]) => v).map(([key, value]) => (
+              <div key={key} className="flex items-center gap-1.5">
+                <span className="text-[10px] text-[#555]">{key}:</span>
+                <span className="text-[10px] text-indigo-400 truncate">{value}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="mt-2 flex items-center gap-1.5">
           <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
           <span className="text-[10px] text-[#888]">Ready to execute</span>
