@@ -51,7 +51,17 @@ npm run start      # Start production server
 
 ## Environment Variables
 
-No environment variables needed.
+Copy `.env.example` to `.env.local` and fill in the values. Required vars:
+
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - OAuth for YouTube, Gmail, Calendar
+- `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` - GitHub OAuth
+- `ANTHROPIC_API_KEY` - Claude API for AI summarization
+- `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Supabase auth
+- `VPS_URL` / `VPS_AUTH_TOKEN` - automations pipeline backend
+- `STICKIES_URL` / `STICKIES_TOKEN` - Stickies API for posted summaries
+- `NEXT_PUBLIC_APP_URL` - public app URL (OAuth callbacks, MCP)
+
+The pipeline (poll loop, SSE stream, DB writes) runs on the VPS - see `server/` and the `VPS_*` vars. `ALLOWED_ORIGIN` and `CHECK_INTERVAL_SEC` are set on the VPS side, not Vercel.
 
 ---
 

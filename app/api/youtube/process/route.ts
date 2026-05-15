@@ -1,3 +1,6 @@
+// TODO: Legacy duplicate of server/pipeline.js parseTimedTextXml path. Still called from
+// app/automations/[id]/page.tsx and mcp/index.js. Migrate those callers to the VPS pipeline,
+// then delete this route and remove the youtube-transcript dependency from package.json.
 import { NextRequest, NextResponse } from 'next/server';
 import { YoutubeTranscript } from 'youtube-transcript';
 import { VPS_URL, vpsAuthHeaders } from '@/lib/vps';
