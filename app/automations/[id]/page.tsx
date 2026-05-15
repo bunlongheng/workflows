@@ -216,7 +216,9 @@ export default function AutomationDetailPage() {
         setNextPageToken(data.nextPageToken);
         setTotalLikes(data.totalResults);
       }
-    } catch {}
+    } catch {
+      showToast('Failed to load liked videos', '#EF4444', true);
+    }
     setLikesLoading(false);
   }
 
@@ -231,8 +233,12 @@ export default function AutomationDetailPage() {
       if (res.ok) {
         setLikes((prev) => prev.filter((v) => v.videoId !== videoId));
         setTotalLikes((prev) => prev - 1);
+      } else {
+        showToast('Unlike failed', '#EF4444', true);
       }
-    } catch {}
+    } catch {
+      showToast('Unlike failed', '#EF4444', true);
+    }
     setUnliking(null);
   }
 
