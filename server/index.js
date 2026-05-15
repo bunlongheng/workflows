@@ -599,7 +599,14 @@ function broadcast(event, data) {
 function startWatcher() {
   console.log(`[watcher] Starting - checking every ${CHECK_INTERVAL / 1000}s`);
 
+  // Concurrency guard: a slow tick must not stack on top of itself.
+  let ytRunning = false;
   async function runCheck() {
+    if (ytRunning) {
+      console.log('[watcher] previous tick still running - skip');
+      return;
+    }
+    ytRunning = true;
     try {
       const newLikes = await checkForNewLikes();
       for (const video of newLikes) {
@@ -631,17 +638,51 @@ function startWatcher() {
       }
     } catch (err) {
       console.error('[watcher] Error:', err.message);
+    } finally {
+      ytRunning = false;
+    }
+  }
+
+  // Guarded wrapper around the Gmail watcher tick so overlapping intervals
+  // (or interval + immediate boot run) cannot pile up.
+  let gmailRunning = false;
+  async function runGmailGuarded() {
+    if (gmailRunning) {
+      console.log('[gmail-watcher] previous tick still running - skip');
+      return;
+    }
+    gmailRunning = true;
+    try {
+      await runGmailCheck();
+    } finally {
+      gmailRunning = false;
     }
   }
 
   setInterval(runCheck, CHECK_INTERVAL);
-  setInterval(runGmailCheck, CHECK_INTERVAL);
+  setInterval(runGmailGuarded, CHECK_INTERVAL);
   runCheck(); // Run immediately on start
-  runGmailCheck(); // Run immediately on start
+  runGmailGuarded(); // Run immediately on start
 }
 
-// Gmail watcher - polls for active Gmail automations
+// Gmail watcher - polls for active Gmail automations.
+// `gmailSeenIds` is bounded to avoid unbounded heap growth (one entry per
+// matched message). When size exceeds GMAIL_SEEN_MAX we drop the oldest
+// GMAIL_SEEN_TRIM entries (Sets preserve insertion order in modern V8).
+const GMAIL_SEEN_MAX = 5000;
+const GMAIL_SEEN_TRIM = 1000;
 const gmailSeenIds = new Set();
+function rememberGmailSeen(key) {
+  gmailSeenIds.add(key);
+  if (gmailSeenIds.size > GMAIL_SEEN_MAX) {
+    let drop = GMAIL_SEEN_TRIM;
+    for (const k of gmailSeenIds) {
+      if (drop-- <= 0) break;
+      gmailSeenIds.delete(k);
+    }
+    console.log(`[gmail-watcher] Trimmed ${GMAIL_SEEN_TRIM} oldest seen IDs (now ${gmailSeenIds.size})`);
+  }
+}
 
 // Seed seen IDs from existing logs to prevent re-firing on restart
 async function seedGmailSeen() {
@@ -652,7 +693,7 @@ async function seedGmailSeen() {
     for (const row of result.rows) {
       try {
         const p = typeof row.trigger_payload === 'string' ? JSON.parse(row.trigger_payload) : row.trigger_payload;
-        if (p?.messageId) gmailSeenIds.add(`${row.automation_id}:${p.messageId}`);
+        if (p?.messageId) rememberGmailSeen(`${row.automation_id}:${p.messageId}`);
       } catch {}
     }
     console.log(`[gmail-watcher] Seeded ${gmailSeenIds.size} seen message IDs`);
@@ -734,7 +775,7 @@ async function runGmailCheck() {
         for (const msg of messages) {
           const seenKey = `${auto.id}:${msg.id}`;
           if (gmailSeenIds.has(seenKey)) continue;
-          gmailSeenIds.add(seenKey);
+          rememberGmailSeen(seenKey);
 
           // Fetch message details
           const detailRes = await fetch(
