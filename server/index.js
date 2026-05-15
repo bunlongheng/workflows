@@ -32,6 +32,20 @@ const PORT = process.env.PORT || 3009;
 const VPS_AUTH_TOKEN = process.env.VPS_AUTH_TOKEN || '';
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '';
 
+// Mask an email for log output: "bheng.code@gmail.com" -> "b***@gmail.com".
+// Falls back gracefully if input isn't an email string.
+function maskEmail(e) {
+  if (!e || typeof e !== 'string') return '';
+  // Handle "Name <addr@host>" form by extracting the address.
+  const addrMatch = e.match(/<([^>]+)>/);
+  const addr = addrMatch ? addrMatch[1] : e;
+  const at = addr.indexOf('@');
+  if (at <= 0) return '***';
+  const local = addr.slice(0, at);
+  const domain = addr.slice(at);
+  return `${local[0]}***${domain}`;
+}
+
 if (!VPS_AUTH_TOKEN) {
   console.warn('[auth] VPS_AUTH_TOKEN is empty - bearer auth is DISABLED (dev mode)');
 }
@@ -111,7 +125,7 @@ app.post('/api/youtube/connect', (req, res) => {
   // Set token in watcher
   setOAuthToken(tokenData);
 
-  console.log(`[connect] YouTube connected: ${accountName} (${accountEmail})`);
+  console.log(`[connect] YouTube connected: ${accountName} (${maskEmail(accountEmail)})`);
   res.json({ success: true, message: `Connected as ${accountName}` });
 });
 
@@ -125,7 +139,7 @@ app.post('/api/gmail/connect', (req, res) => {
   const tokenData = { access_token, refresh_token, expires_in, accountEmail, saved_at: new Date().toISOString() };
   if (!fs.existsSync('./data')) fs.mkdirSync('./data', { recursive: true });
   fs.writeFileSync(GMAIL_TOKEN_FILE, JSON.stringify(tokenData, null, 2));
-  console.log(`[gmail] Connected: ${accountEmail}`);
+  console.log(`[gmail] Connected: ${maskEmail(accountEmail)}`);
   res.json({ success: true });
 });
 
@@ -196,7 +210,8 @@ app.get('/api/gmail/search', async (req, res) => {
 
     res.json({ messages, total: data.resultSizeEstimate || 0 });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[gmail/search] error:', err.message);
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -252,7 +267,7 @@ app.post('/api/automations/log', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('[log] DB error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -289,7 +304,7 @@ app.get('/api/automations/list', async (req, res) => {
     res.json({ automations: result.rows });
   } catch (err) {
     console.error('[automations] List error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -320,7 +335,8 @@ app.get('/api/automations/:id', async (req, res) => {
 
     res.json({ automation: autoResult.rows[0], logs: logsResult.rows });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[automations] Get error:', err.message);
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -332,7 +348,8 @@ app.delete('/api/automations/:id', async (req, res) => {
     await pool.query('DELETE FROM automations WHERE id = $1', [id]);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[automations] Delete error:', err.message);
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -354,7 +371,8 @@ app.patch('/api/automations/:id', async (req, res) => {
     await pool.query(`UPDATE automations SET ${sets.join(', ')} WHERE id = $${idx}`, vals);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[automations] Patch error:', err.message);
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -404,7 +422,7 @@ app.post('/api/automations', async (req, res) => {
     res.json({ automation: result.rows[0] });
   } catch (err) {
     console.error('[automations] Create error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -788,7 +806,7 @@ async function runGmailCheck() {
           const subject = headers.find(h => h.name === 'Subject')?.value || '';
           const from = headers.find(h => h.name === 'From')?.value || '';
 
-          console.log(`[gmail-watcher] Match for "${auto.name}": ${subject} from ${from}`);
+          console.log(`[gmail-watcher] Match for "${auto.name}": ${subject} from ${maskEmail(from)}`);
           broadcast('gmail_match', { automationId: auto.id, subject, from, messageId: msg.id });
 
           // Execute action
@@ -866,9 +884,18 @@ function getHistory() {
   }
 }
 
-app.listen(PORT, async () => {
-  console.log(`[automations-server] Running on port ${PORT}`);
-  await migrate();
-  await seedGmailSeen();
-  startWatcher();
-});
+// Run migrations BEFORE accepting traffic so /api/* doesn't 500 during cold
+// start while ALTER TABLE / CREATE INDEX statements settle.
+(async () => {
+  try {
+    await migrate();
+  } catch (err) {
+    console.error('[startup] migrate failed:', err.message);
+    process.exit(1);
+  }
+  app.listen(PORT, async () => {
+    console.log(`[automations-server] Running on port ${PORT}`);
+    await seedGmailSeen();
+    startWatcher();
+  });
+})();
