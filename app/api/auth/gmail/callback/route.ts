@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyAndClearOAuthState } from '@/lib/oauth-state';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
@@ -7,12 +8,29 @@ const REDIRECT_URI = process.env.NEXT_PUBLIC_APP_URL
   ? `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/gmail/callback`
   : 'http://localhost:3008/api/auth/gmail/callback';
 
+function errorRedirect(request: NextRequest, reason = 'error'): NextResponse {
+  const url = new URL(`/automations/new?connection=gmail&status=${reason}`, request.url);
+  // Use a throwaway response purely to carry the state-cookie deletion.
+  const res = NextResponse.redirect(url);
+  verifyAndClearOAuthState(request, res, 'gmail');
+  return res;
+}
+
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get('code');
   const error = request.nextUrl.searchParams.get('error');
 
   if (error || !code || !CLIENT_ID || !CLIENT_SECRET) {
-    return NextResponse.redirect(new URL('/automations/new?connection=gmail&status=error', request.url));
+    return errorRedirect(request);
+  }
+
+  // CSRF: verify state echoed back matches the cookie we set during init.
+  // We need to attach the cookie-clearing to whatever response we eventually
+  // return, so capture verification here and re-apply on the final redirect.
+  const stateProbe = NextResponse.next();
+  const stateOk = verifyAndClearOAuthState(request, stateProbe, 'gmail');
+  if (!stateOk) {
+    return NextResponse.json({ error: 'Invalid OAuth state' }, { status: 400 });
   }
 
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -28,7 +46,7 @@ export async function GET(request: NextRequest) {
   });
 
   if (!tokenRes.ok) {
-    return NextResponse.redirect(new URL('/automations/new?connection=gmail&status=error', request.url));
+    return errorRedirect(request);
   }
 
   const tokens = await tokenRes.json();
@@ -71,10 +89,23 @@ export async function GET(request: NextRequest) {
     console.error('[gmail-callback] Failed to forward tokens:', err);
   }
 
+  // Defensive: assert the redirect target is same-origin. Today the URL is
+  // built from `request.url` so this is by construction, but if a future
+  // change ever sources the target from a query/cookie param this guard
+  // prevents open-redirect attacks.
+  const requestOrigin = new URL(request.url).origin;
   const successUrl = new URL('/automations/new', request.url);
   successUrl.searchParams.set('connection', 'gmail');
   successUrl.searchParams.set('status', 'success');
   successUrl.searchParams.set('account', accountEmail);
 
-  return NextResponse.redirect(successUrl.toString());
+  const finalUrl =
+    successUrl.origin === requestOrigin
+      ? successUrl
+      : new URL('/automations/new?connection=gmail&status=success', request.url);
+
+  const res = NextResponse.redirect(finalUrl.toString());
+  // Carry forward the state-cookie deletion onto the success response
+  stateProbe.cookies.getAll().forEach((c) => res.cookies.set(c));
+  return res;
 }

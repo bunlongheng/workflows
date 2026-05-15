@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { setOAuthStateCookie } from '@/lib/oauth-state';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const REDIRECT_URI = process.env.NEXT_PUBLIC_APP_URL
@@ -15,6 +16,11 @@ export async function GET() {
     return NextResponse.json({ error: 'Google OAuth not configured' }, { status: 500 });
   }
 
+  // Stage a placeholder response so we can mint and persist the state cookie
+  // before composing the final redirect URL.
+  const stageRes = NextResponse.next();
+  const state = setOAuthStateCookie(stageRes, 'gmail');
+
   const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   authUrl.searchParams.set('client_id', CLIENT_ID);
   authUrl.searchParams.set('redirect_uri', REDIRECT_URI);
@@ -22,6 +28,10 @@ export async function GET() {
   authUrl.searchParams.set('scope', SCOPES);
   authUrl.searchParams.set('access_type', 'offline');
   authUrl.searchParams.set('prompt', 'consent');
+  authUrl.searchParams.set('state', state);
 
-  return NextResponse.redirect(authUrl.toString());
+  const res = NextResponse.redirect(authUrl.toString());
+  // Forward the state cookie onto the actual redirect response
+  stageRes.cookies.getAll().forEach((c) => res.cookies.set(c));
+  return res;
 }
