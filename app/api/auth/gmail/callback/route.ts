@@ -61,9 +61,10 @@ export async function GET(request: NextRequest) {
     accountEmail = userData.email || '';
   }
 
-  // Save token to VPS
+  // Save token to VPS. If forwarding fails, the connection is unusable
+  // downstream — redirect to error rather than show a misleading success.
   try {
-    await fetch(`${VPS_URL}/api/gmail/connect`, {
+    const connectRes = await fetch(`${VPS_URL}/api/gmail/connect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...vpsAuthHeaders() },
       body: JSON.stringify({
@@ -73,9 +74,13 @@ export async function GET(request: NextRequest) {
         accountEmail,
       }),
     });
+    if (!connectRes.ok) {
+      console.error('[gmail-callback] VPS connect returned', connectRes.status);
+      return errorRedirect(request);
+    }
 
     // Register connection
-    await fetch(`${VPS_URL}/api/connections`, {
+    const regRes = await fetch(`${VPS_URL}/api/connections`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...vpsAuthHeaders() },
       body: JSON.stringify({
@@ -85,8 +90,13 @@ export async function GET(request: NextRequest) {
         scopes: ['gmail.readonly'],
       }),
     });
+    if (!regRes.ok) {
+      console.error('[gmail-callback] VPS connections returned', regRes.status);
+      return errorRedirect(request);
+    }
   } catch (err) {
     console.error('[gmail-callback] Failed to forward tokens:', err);
+    return errorRedirect(request);
   }
 
   // Defensive: assert the redirect target is same-origin. Today the URL is

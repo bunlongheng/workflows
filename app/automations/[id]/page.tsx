@@ -151,6 +151,19 @@ export default function AutomationDetailPage() {
       .finally(() => setLoading(false));
 
     const es = new EventSource('/api/events');
+    let sseErrorCount = 0;
+    let sseErrorToastShown = false;
+    es.onerror = () => {
+      sseErrorCount += 1;
+      if (!sseErrorToastShown) {
+        sseErrorToastShown = true;
+        showToast('Connection lost, retrying...', '#EF4444', true);
+      }
+      if (sseErrorCount >= 5) {
+        es.close();
+        showToast('Realtime updates disabled', '#EF4444', true);
+      }
+    };
     es.addEventListener('processing', (e) => {
       const data = JSON.parse(e.data);
       setProcessing(data.videoId);
@@ -203,7 +216,9 @@ export default function AutomationDetailPage() {
         setNextPageToken(data.nextPageToken);
         setTotalLikes(data.totalResults);
       }
-    } catch {}
+    } catch {
+      showToast('Failed to load liked videos', '#EF4444', true);
+    }
     setLikesLoading(false);
   }
 
@@ -218,8 +233,12 @@ export default function AutomationDetailPage() {
       if (res.ok) {
         setLikes((prev) => prev.filter((v) => v.videoId !== videoId));
         setTotalLikes((prev) => prev - 1);
+      } else {
+        showToast('Unlike failed', '#EF4444', true);
       }
-    } catch {}
+    } catch {
+      showToast('Unlike failed', '#EF4444', true);
+    }
     setUnliking(null);
   }
 
