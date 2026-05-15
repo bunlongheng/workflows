@@ -210,7 +210,8 @@ app.get('/api/gmail/search', async (req, res) => {
 
     res.json({ messages, total: data.resultSizeEstimate || 0 });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[gmail/search] error:', err.message);
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -266,7 +267,7 @@ app.post('/api/automations/log', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('[log] DB error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -303,7 +304,7 @@ app.get('/api/automations/list', async (req, res) => {
     res.json({ automations: result.rows });
   } catch (err) {
     console.error('[automations] List error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -334,7 +335,8 @@ app.get('/api/automations/:id', async (req, res) => {
 
     res.json({ automation: autoResult.rows[0], logs: logsResult.rows });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[automations] Get error:', err.message);
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -346,7 +348,8 @@ app.delete('/api/automations/:id', async (req, res) => {
     await pool.query('DELETE FROM automations WHERE id = $1', [id]);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[automations] Delete error:', err.message);
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -368,7 +371,8 @@ app.patch('/api/automations/:id', async (req, res) => {
     await pool.query(`UPDATE automations SET ${sets.join(', ')} WHERE id = $${idx}`, vals);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[automations] Patch error:', err.message);
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -418,7 +422,7 @@ app.post('/api/automations', async (req, res) => {
     res.json({ automation: result.rows[0] });
   } catch (err) {
     console.error('[automations] Create error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
