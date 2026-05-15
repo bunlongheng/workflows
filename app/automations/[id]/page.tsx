@@ -151,6 +151,19 @@ export default function AutomationDetailPage() {
       .finally(() => setLoading(false));
 
     const es = new EventSource('/api/events');
+    let sseErrorCount = 0;
+    let sseErrorToastShown = false;
+    es.onerror = () => {
+      sseErrorCount += 1;
+      if (!sseErrorToastShown) {
+        sseErrorToastShown = true;
+        showToast('Connection lost, retrying...', '#EF4444', true);
+      }
+      if (sseErrorCount >= 5) {
+        es.close();
+        showToast('Realtime updates disabled', '#EF4444', true);
+      }
+    };
     es.addEventListener('processing', (e) => {
       const data = JSON.parse(e.data);
       setProcessing(data.videoId);
