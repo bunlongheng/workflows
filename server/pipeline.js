@@ -2,7 +2,7 @@ import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import fs from 'fs';
-import pg from 'pg';
+import { pool } from './db.js';
 import { markProcessed } from './watcher.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -10,12 +10,6 @@ config({ path: resolve(__dirname, '.env') });
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 console.log(`[pipeline] ANTHROPIC_API_KEY loaded: ${ANTHROPIC_API_KEY ? 'yes' : 'no'}`);
-
-const pool = new pg.Pool({
-  host: '/var/run/postgresql',
-  database: '2026',
-  user: 'postgres',
-});
 
 function getOAuthToken() {
   try {
@@ -28,11 +22,12 @@ function getOAuthToken() {
 export async function processVideo(videoId) {
   console.log(`[pipeline] Processing video: ${videoId}`);
 
-  // Step 1: Get video metadata (title, channel, description)
-  const meta = await getVideoMeta(videoId);
+  // Steps 1+2: Metadata and transcript are independent - fetch in parallel
+  const [meta, transcript] = await Promise.all([
+    getVideoMeta(videoId),
+    getTranscript(videoId),
+  ]);
 
-  // Step 2: Get transcript
-  const transcript = await getTranscript(videoId);
   if (!transcript) {
     console.warn(`[pipeline] No transcript available for ${videoId}`);
     markProcessed(videoId, meta.title, { summary: 'No transcript available' });
@@ -47,11 +42,11 @@ export async function processVideo(videoId) {
   // Step 4: Deliver to Stickies
   await deliverOutput(videoId, meta, result);
 
-  // Step 5: Generate Mind Map
-  await generateMindMap(meta.title, videoId, result);
-
-  // Step 6: Generate Diagram
-  await generateDiagram(meta.title, videoId, result);
+  // Steps 5+6: Mind map and diagram are independent - generate in parallel
+  await Promise.all([
+    generateMindMap(meta.title, videoId, result),
+    generateDiagram(meta.title, videoId, result),
+  ]);
 
   // Step 7: Mark as processed
   markProcessed(videoId, meta.title, result);
@@ -247,17 +242,32 @@ async function deliverOutput(videoId, meta, result) {
   fs.writeFileSync(`./data/outputs/${videoId}.html`, content);
 }
 
+// Escape user/AI-supplied strings before embedding into HTML.
+// Stickies renders this content as HTML, so unescaped values are an XSS vector.
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function formatAsHTML(meta, videoId, result) {
   const { title, channel, description } = meta;
   const thumbnail = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
   const url = `https://youtube.com/watch?v=${videoId}`;
 
+  const safeTitle = escapeHtml(title);
+  const safeChannel = escapeHtml(channel);
+
   const topicsHTML = (result.topics || []).map(t =>
-    `<span style="display:inline-block;padding:2px 8px;margin:2px;border-radius:12px;background:#1e1e1e;color:#aaa;font-size:11px;">${t}</span>`
+    `<span style="display:inline-block;padding:2px 8px;margin:2px;border-radius:12px;background:#1e1e1e;color:#aaa;font-size:11px;">${escapeHtml(t)}</span>`
   ).join('');
 
   const ideasHTML = (result.ideas || []).map(idea =>
-    `<li style="margin-bottom:6px;line-height:1.5;">${idea}</li>`
+    `<li style="margin-bottom:6px;line-height:1.5;">${escapeHtml(idea)}</li>`
   ).join('');
 
   // Extract links from description
@@ -266,27 +276,27 @@ function formatAsHTML(meta, videoId, result) {
 
   const linksHTML = uniqueLinks.length > 0
     ? `<h3 style="margin:20px 0 8px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px;">Links</h3>
-<ul style="margin:0;padding-left:16px;font-size:13px;">${uniqueLinks.map(l => `<li style="margin-bottom:4px;"><a href="${l}" target="_blank" style="color:#6366f1;word-break:break-all;">${l}</a></li>`).join('')}</ul>`
+<ul style="margin:0;padding-left:16px;font-size:13px;">${uniqueLinks.map(l => `<li style="margin-bottom:4px;"><a href="${escapeHtml(l)}" target="_blank" style="color:#6366f1;word-break:break-all;">${escapeHtml(l)}</a></li>`).join('')}</ul>`
     : '';
 
   const descHTML = description
     ? `<h3 style="margin:20px 0 8px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px;">Description</h3>
-<p style="margin:0;line-height:1.6;color:#999;font-size:13px;white-space:pre-wrap;">${description.slice(0, 2000)}</p>`
+<p style="margin:0;line-height:1.6;color:#999;font-size:13px;white-space:pre-wrap;">${escapeHtml(description.slice(0, 2000))}</p>`
     : '';
 
   return `<div style="font-family:-apple-system,system-ui,sans-serif;color:#e0e0e0;max-width:100%;overflow-wrap:break-word;">
 <a href="${url}" target="_blank" style="text-decoration:none;">
-  <img src="${thumbnail}" alt="${title}" style="width:100%;border-radius:8px;margin-bottom:12px;" />
+  <img src="${thumbnail}" alt="${safeTitle}" style="width:100%;border-radius:8px;margin-bottom:12px;" />
 </a>
 
-<h2 style="margin:0 0 4px 0;font-size:18px;color:#fff;line-height:1.3;">${title}</h2>
-${channel ? `<p style="margin:0 0 2px;color:#888;font-size:12px;">${channel}</p>` : ''}
+<h2 style="margin:0 0 4px 0;font-size:18px;color:#fff;line-height:1.3;">${safeTitle}</h2>
+${safeChannel ? `<p style="margin:0 0 2px;color:#888;font-size:12px;">${safeChannel}</p>` : ''}
 <a href="${url}" target="_blank" style="color:#666;font-size:12px;text-decoration:none;">${url}</a>
 
 ${topicsHTML ? `<div style="margin:12px 0;">${topicsHTML}</div>` : ''}
 
 <h3 style="margin:16px 0 8px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px;">Summary</h3>
-<p style="margin:0;line-height:1.6;color:#ccc;font-size:14px;">${result.summary || 'No summary available'}</p>
+<p style="margin:0;line-height:1.6;color:#ccc;font-size:14px;">${escapeHtml(result.summary) || 'No summary available'}</p>
 
 ${ideasHTML ? `<h3 style="margin:20px 0 8px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px;">Key Takeaways</h3>
 <ol style="margin:0;padding-left:20px;color:#ccc;font-size:14px;">${ideasHTML}</ol>` : ''}

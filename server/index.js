@@ -12,6 +12,50 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3009;
+
+// --- Bearer-token auth ---
+// All routes require `Authorization: Bearer ${VPS_AUTH_TOKEN}`.
+// If VPS_AUTH_TOKEN is unset/empty, auth is bypassed (with a startup warn) so
+// local-dev runs keep working without setup.
+//
+// TODO (Next.js side, not owned by this agent): when VPS_AUTH_TOKEN is set,
+// the proxy/server routes that call this VPS need to forward the header.
+// Files to update:
+//   - app/api/automations/route.ts
+//   - app/api/automations/[id]/route.ts
+//   - app/api/automations/log/route.ts
+//   - app/api/connections/route.ts
+//   - app/api/connections/[integrationId]/route.ts
+//   - app/api/youtube/* (connect, disconnect, processed, status, process, token)
+//   - app/api/gmail/* (connect, disconnect, search)
+//   - any client SSE wiring that hits /api/events
+const VPS_AUTH_TOKEN = process.env.VPS_AUTH_TOKEN || '';
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '';
+
+if (!VPS_AUTH_TOKEN) {
+  console.warn('[auth] VPS_AUTH_TOKEN is empty - bearer auth is DISABLED (dev mode)');
+}
+if (!ALLOWED_ORIGIN) {
+  console.warn('[cors] ALLOWED_ORIGIN is empty - SSE will fall back to "*"');
+}
+
+app.use((req, res, next) => {
+  // No auth configured - allow everything (dev)
+  if (!VPS_AUTH_TOKEN) return next();
+
+  // /health stays open for uptime checks
+  if (req.path === '/health') return next();
+
+  // SSE EventSource cannot send custom headers; allow token via query param fallback.
+  if (req.path === '/api/events' && req.query.token === VPS_AUTH_TOKEN) return next();
+
+  const header = req.headers.authorization || '';
+  const expected = `Bearer ${VPS_AUTH_TOKEN}`;
+  if (header !== expected) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  next();
+});
 const CHECK_INTERVAL = process.env.CHECK_INTERVAL_SEC
   ? parseInt(process.env.CHECK_INTERVAL_SEC) * 1000
   : (parseInt(process.env.CHECK_INTERVAL_MIN) || 5) * 60 * 1000;
@@ -167,12 +211,7 @@ app.post('/api/youtube/disconnect', (req, res) => {
 });
 
 // Log automation execution to DB
-import pg from 'pg';
-const pool = new pg.Pool({
-  host: '/var/run/postgresql',
-  database: '2026',
-  user: 'postgres',
-});
+import { pool } from './db.js';
 
 app.post('/api/automations/log', async (req, res) => {
   const { videoId, title, summary, result: resultStr, automationId } = req.body;
@@ -217,7 +256,9 @@ app.post('/api/automations/log', async (req, res) => {
   }
 });
 
-// List all automations with their integrations and recent logs
+// List all automations with their integrations and recent logs.
+// Uses a single LEFT JOIN against an aggregate of automation_logs to avoid
+// the previous 3-correlated-subquery N+1 pattern.
 app.get('/api/automations/list', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -228,12 +269,21 @@ app.get('/api/automations/list', async (req, res) => {
         COALESCE(ti.type, a.trigger_integration_type) as trigger_integration_type,
         COALESCE(ai.name, a.action_integration_type) as action_integration_name,
         COALESCE(ai.type, a.action_integration_type) as action_integration_type,
-        (SELECT count(*) FROM automation_logs WHERE automation_id = a.id) as total_runs,
-        (SELECT count(*) FROM automation_logs WHERE automation_id = a.id AND result IN ('success', 'ok')) as success_runs,
-        (SELECT triggered_at FROM automation_logs WHERE automation_id = a.id ORDER BY triggered_at DESC LIMIT 1) as last_run
+        COALESCE(l.total_runs, 0) as total_runs,
+        COALESCE(l.success_runs, 0) as success_runs,
+        l.last_run as last_run
       FROM automations a
       LEFT JOIN integrations ti ON a.trigger_integration_id = ti.id
       LEFT JOIN integrations ai ON a.action_integration_id = ai.id
+      LEFT JOIN (
+        SELECT
+          automation_id,
+          count(*) as total_runs,
+          count(*) FILTER (WHERE result IN ('success', 'ok')) as success_runs,
+          max(triggered_at) as last_run
+        FROM automation_logs
+        GROUP BY automation_id
+      ) l ON l.automation_id = a.id
       ORDER BY a.created_at DESC
     `);
     res.json({ automations: result.rows });
@@ -447,6 +497,33 @@ async function migrate() {
     WHERE a.id = a2.id AND (a.trigger_integration_type IS NULL OR a.action_integration_type IS NULL)
   `);
   console.log('[migrate] automation integration types ready');
+
+  // Apply SQL files under server/migrations. Each statement runs separately so
+  // CREATE INDEX CONCURRENTLY is permitted (cannot run inside a transaction).
+  try {
+    const migrationsDir = join(__dirname, 'migrations');
+    if (fs.existsSync(migrationsDir)) {
+      const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+      for (const file of files) {
+        const sql = fs.readFileSync(join(migrationsDir, file), 'utf-8');
+        const statements = sql
+          .split(/;\s*(?:\r?\n|$)/)
+          .map((s) => s.replace(/--.*$/gm, '').trim())
+          .filter(Boolean);
+        for (const stmt of statements) {
+          try {
+            await pool.query(stmt);
+          } catch (err) {
+            // IF NOT EXISTS should make this idempotent; log and continue.
+            console.error(`[migrate] ${file} stmt failed: ${err.message}`);
+          }
+        }
+        console.log(`[migrate] applied ${file} (${statements.length} stmts)`);
+      }
+    }
+  } catch (err) {
+    console.error('[migrate] index migrations error:', err.message);
+  }
 }
 
 // GET /api/connections - list all
@@ -505,7 +582,7 @@ app.get('/api/events', (req, res) => {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': ALLOWED_ORIGIN || '*',
   });
   sseClients.add(res);
   req.on('close', () => sseClients.delete(res));
@@ -522,7 +599,14 @@ function broadcast(event, data) {
 function startWatcher() {
   console.log(`[watcher] Starting - checking every ${CHECK_INTERVAL / 1000}s`);
 
+  // Concurrency guard: a slow tick must not stack on top of itself.
+  let ytRunning = false;
   async function runCheck() {
+    if (ytRunning) {
+      console.log('[watcher] previous tick still running - skip');
+      return;
+    }
+    ytRunning = true;
     try {
       const newLikes = await checkForNewLikes();
       for (const video of newLikes) {
@@ -554,17 +638,51 @@ function startWatcher() {
       }
     } catch (err) {
       console.error('[watcher] Error:', err.message);
+    } finally {
+      ytRunning = false;
+    }
+  }
+
+  // Guarded wrapper around the Gmail watcher tick so overlapping intervals
+  // (or interval + immediate boot run) cannot pile up.
+  let gmailRunning = false;
+  async function runGmailGuarded() {
+    if (gmailRunning) {
+      console.log('[gmail-watcher] previous tick still running - skip');
+      return;
+    }
+    gmailRunning = true;
+    try {
+      await runGmailCheck();
+    } finally {
+      gmailRunning = false;
     }
   }
 
   setInterval(runCheck, CHECK_INTERVAL);
-  setInterval(runGmailCheck, CHECK_INTERVAL);
+  setInterval(runGmailGuarded, CHECK_INTERVAL);
   runCheck(); // Run immediately on start
-  runGmailCheck(); // Run immediately on start
+  runGmailGuarded(); // Run immediately on start
 }
 
-// Gmail watcher - polls for active Gmail automations
+// Gmail watcher - polls for active Gmail automations.
+// `gmailSeenIds` is bounded to avoid unbounded heap growth (one entry per
+// matched message). When size exceeds GMAIL_SEEN_MAX we drop the oldest
+// GMAIL_SEEN_TRIM entries (Sets preserve insertion order in modern V8).
+const GMAIL_SEEN_MAX = 5000;
+const GMAIL_SEEN_TRIM = 1000;
 const gmailSeenIds = new Set();
+function rememberGmailSeen(key) {
+  gmailSeenIds.add(key);
+  if (gmailSeenIds.size > GMAIL_SEEN_MAX) {
+    let drop = GMAIL_SEEN_TRIM;
+    for (const k of gmailSeenIds) {
+      if (drop-- <= 0) break;
+      gmailSeenIds.delete(k);
+    }
+    console.log(`[gmail-watcher] Trimmed ${GMAIL_SEEN_TRIM} oldest seen IDs (now ${gmailSeenIds.size})`);
+  }
+}
 
 // Seed seen IDs from existing logs to prevent re-firing on restart
 async function seedGmailSeen() {
@@ -575,7 +693,7 @@ async function seedGmailSeen() {
     for (const row of result.rows) {
       try {
         const p = typeof row.trigger_payload === 'string' ? JSON.parse(row.trigger_payload) : row.trigger_payload;
-        if (p?.messageId) gmailSeenIds.add(`${row.automation_id}:${p.messageId}`);
+        if (p?.messageId) rememberGmailSeen(`${row.automation_id}:${p.messageId}`);
       } catch {}
     }
     console.log(`[gmail-watcher] Seeded ${gmailSeenIds.size} seen message IDs`);
@@ -657,7 +775,7 @@ async function runGmailCheck() {
         for (const msg of messages) {
           const seenKey = `${auto.id}:${msg.id}`;
           if (gmailSeenIds.has(seenKey)) continue;
-          gmailSeenIds.add(seenKey);
+          rememberGmailSeen(seenKey);
 
           // Fetch message details
           const detailRes = await fetch(
