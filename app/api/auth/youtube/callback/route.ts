@@ -80,9 +80,11 @@ export async function GET(request: NextRequest) {
     accountEmail = userData.email || '';
   }
 
-  // Forward tokens to VPS server for the watcher pipeline
+  // Forward tokens to VPS server for the watcher pipeline. If this fails,
+  // the connection is unusable downstream — redirect to error rather than
+  // misleading the user with a success state.
   try {
-    await fetch(`${VPS_URL}/api/youtube/connect`, {
+    const vpsRes = await fetch(`${VPS_URL}/api/youtube/connect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...vpsAuthHeaders() },
       body: JSON.stringify({
@@ -93,8 +95,13 @@ export async function GET(request: NextRequest) {
         accountEmail,
       }),
     });
+    if (!vpsRes.ok) {
+      console.error('[youtube-callback] VPS forward returned', vpsRes.status);
+      return errorRedirect(request);
+    }
   } catch (err) {
     console.error('[youtube-callback] Failed to forward tokens to VPS:', err);
+    return errorRedirect(request);
   }
 
   // Defensive: assert the redirect target is same-origin. Today the URL is
