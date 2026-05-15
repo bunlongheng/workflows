@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { integrations } from '@/data/integrations';
 
@@ -13,11 +13,14 @@ export type TriggerNodeData = {
   onSelect: (id: string) => void;
 };
 
-export default function TriggerNode({ id, data, selected }: NodeProps) {
+function TriggerNode({ id, data, selected }: NodeProps) {
   const [hovered, setHovered] = useState(false);
   const nodeData = data as unknown as TriggerNodeData;
 
-  const integration = integrations.find((i) => i.id === nodeData.integrationId);
+  const integration = useMemo(
+    () => integrations.find((i) => i.id === nodeData.integrationId),
+    [nodeData.integrationId]
+  );
   if (!integration) return null;
 
   return (
@@ -118,3 +121,5 @@ export default function TriggerNode({ id, data, selected }: NodeProps) {
     </div>
   );
 }
+
+export default memo(TriggerNode);

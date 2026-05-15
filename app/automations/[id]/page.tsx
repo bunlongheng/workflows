@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
@@ -113,12 +113,23 @@ export default function AutomationDetailPage() {
     setTimeout(() => { setToast(''); setToastIsError(false); }, 3000);
   }, []);
 
-  const refreshLogs = useCallback(() => {
+  // Underlying fetch
+  const fetchLogsNow = useCallback(() => {
     fetch(`/api/automations/${id}`)
       .then((r) => r.json())
       .then((data) => { if (data.logs) setLogs(data.logs); })
       .catch(() => {});
   }, [id]);
+
+  // Debounce: coalesce bursts of SSE events into one refetch at most every 2s.
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshLogs = useCallback(() => {
+    if (refreshTimer.current) return; // already scheduled
+    refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = null;
+      fetchLogsNow();
+    }, 2000);
+  }, [fetchLogsNow]);
 
   useEffect(() => {
     fetch(`/api/automations/${id}`)
@@ -150,7 +161,19 @@ export default function AutomationDetailPage() {
       setProcessing(null);
       setProcessedIds((prev) => new Set([...prev, data.videoId]));
       showToast(`Done "${data.title?.slice(0, 30)}"`, '#34C759');
-      refreshLogs();
+      // Append synthetic log entry locally instead of refetching all logs.
+      // The authoritative row will land on the next debounced refresh from `logged`,
+      // but the UI updates instantly here.
+      const synthetic: LogEntry = {
+        id: `sse-${data.videoId}-${Date.now()}`,
+        automation_name: '',
+        triggered_at: new Date().toISOString(),
+        trigger_payload: { videoId: data.videoId, title: data.title || '' },
+        result: 'success',
+        detail: data.title || '',
+        via: 'sse',
+      };
+      setLogs((prev) => [synthetic, ...prev]);
     });
     es.addEventListener('logged', () => refreshLogs());
     es.addEventListener('gmail_match', () => refreshLogs());
@@ -160,7 +183,13 @@ export default function AutomationDetailPage() {
         showToast(`Failed: ${data.error?.slice(0, 40)}`, '#EF4444', true);
       } catch {}
     });
-    return () => es.close();
+    return () => {
+      es.close();
+      if (refreshTimer.current) {
+        clearTimeout(refreshTimer.current);
+        refreshTimer.current = null;
+      }
+    };
   }, [id, refreshLogs, showToast]);
 
   async function fetchLikes(pageToken?: string) {
@@ -551,7 +580,7 @@ export default function AutomationDetailPage() {
                     }}
                   >
                     <a href={`https://youtube.com/watch?v=${video.videoId}`} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
-                      <img src={video.thumbnail} alt="" className="rounded-xl" style={{ width: '88px', height: '50px', objectFit: 'cover' }} />
+                      <img src={video.thumbnail} alt="" className="rounded-xl" loading="lazy" decoding="async" style={{ width: '88px', height: '50px', objectFit: 'cover' }} />
                     </a>
                     <div className="flex-1 min-w-0">
                       <a href={`https://youtube.com/watch?v=${video.videoId}`} target="_blank" rel="noopener noreferrer"
@@ -692,7 +721,7 @@ export default function AutomationDetailPage() {
                           {thumbnail && (
                             <div className="flex gap-3 pt-3">
                               <a href={`https://youtube.com/watch?v=${videoId}`} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
-                                <img src={thumbnail} alt="" className="rounded-xl" style={{ width: '110px', height: '62px', objectFit: 'cover' }} />
+                                <img src={thumbnail} alt="" className="rounded-xl" loading="lazy" decoding="async" style={{ width: '110px', height: '62px', objectFit: 'cover' }} />
                               </a>
                               <div className="min-w-0">
                                 <a href={`https://youtube.com/watch?v=${videoId}`} target="_blank" rel="noopener noreferrer"

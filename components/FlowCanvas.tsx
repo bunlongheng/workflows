@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -22,6 +22,27 @@ import GradientEdge from './edges/GradientEdge';
 import NodeConfigPanel from './panels/NodeConfigPanel';
 import CodePanel from './panels/CodePanel';
 import { integrations, Integration } from '@/data/integrations';
+
+// Map tailwind bg class -> hex (used for gradient edge endpoints)
+const COLOR_HEX: Record<string, string> = {
+  'bg-red-600': '#dc2626',
+  'bg-red-500': '#ef4444',
+  'bg-yellow-500': '#eab308',
+  'bg-gray-800': '#1f2937',
+  'bg-gray-500': '#6b7280',
+  'bg-indigo-500': '#6366f1',
+  'bg-orange-500': '#f97316',
+  'bg-purple-500': '#a855f7',
+  'bg-purple-600': '#9333ea',
+  'bg-emerald-600': '#059669',
+  'bg-blue-500': '#3b82f6',
+};
+
+function integrationHex(integrationId: string | undefined, map: Map<string, Integration>): string {
+  if (!integrationId) return '#6366f1';
+  const integ = map.get(integrationId);
+  return COLOR_HEX[integ?.color || ''] || '#6366f1';
+}
 
 const initialNodes: Node[] = [];
 
@@ -180,6 +201,13 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
 
+  // Build an id -> integration lookup once instead of array.find() per call
+  const integrationsById = useMemo(() => {
+    const m = new Map<string, Integration>();
+    for (const i of integrations) m.set(i.id, i);
+    return m;
+  }, []);
+
   // Cmd+S to save
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -189,11 +217,11 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
         const actions = nodes.filter((n) => n.type === 'actionNode');
         if (triggers.length === 0 && actions.length === 0) return;
         const triggerNames = triggers.map((t) => {
-          const integ = integrations.find((i) => i.id === t.data.integrationId);
+          const integ = integrationsById.get(t.data.integrationId as string);
           return `${integ?.name || ''} ${String(t.data.eventLabel || '').replace(integ?.name || '', '').trim()}`;
         });
         const actionNames = actions.map((a) => {
-          const integ = integrations.find((i) => i.id === a.data.integrationId);
+          const integ = integrationsById.get(a.data.integrationId as string);
           return integ?.name || '';
         });
         const name = [...triggerNames, ...actionNames].join(' > ');
@@ -202,7 +230,7 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [nodes, onSave]);
+  }, [nodes, onSave, integrationsById]);
 
   useEffect(() => {
     const triggerCount = nodes.filter((n) => n.type === 'triggerNode').length;
@@ -212,22 +240,13 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
     const triggers = nodes.filter((n) => n.type === 'triggerNode');
     const actions = nodes.filter((n) => n.type === 'actionNode');
     if (triggers.length > 0 || actions.length > 0) {
-      const parts: string[] = [];
-      for (const t of triggers) {
-        const integ = integrations.find((i) => i.id === t.data.integrationId);
-        parts.push(`${integ?.name || ''} ${t.data.eventLabel || ''}`);
-      }
-      for (const a of actions) {
-        const integ = integrations.find((i) => i.id === a.data.integrationId);
-        parts.push(`${integ?.name || ''} ${a.data.eventLabel || ''}`);
-      }
       // Shorten: "YouTube Video Liked > Diagram Create Diagram" -> "YouTube Liked > Diagram"
       const triggerNames = triggers.map((t) => {
-        const integ = integrations.find((i) => i.id === t.data.integrationId);
+        const integ = integrationsById.get(t.data.integrationId as string);
         return `${integ?.name || ''} ${String(t.data.eventLabel || '').replace(integ?.name || '', '').trim()}`;
       });
       const actionNames = actions.map((a) => {
-        const integ = integrations.find((i) => i.id === a.data.integrationId);
+        const integ = integrationsById.get(a.data.integrationId as string);
         return integ?.name || '';
       });
       const name = [...triggerNames, ...actionNames].join(' > ');
@@ -235,7 +254,7 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
     } else {
       onFlowNameChange?.('');
     }
-  }, [nodes, onTriggerCountChange, onFlowNameChange]);
+  }, [nodes, onTriggerCountChange, onFlowNameChange, integrationsById]);
   const [modal, setModal] = useState<{
     integration: Integration;
     position: { x: number; y: number };
@@ -265,18 +284,30 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
 
   const onConnect = useCallback(
     (params: Connection) => {
-      setEdges((eds) =>
-        addEdge(
+      setEdges((eds) => {
+        // Resolve current node list to pull integration colors at edge creation time
+        const sourceNode = nodes.find((n) => n.id === params.source);
+        const targetNode = nodes.find((n) => n.id === params.target);
+        const sourceColor = integrationHex(
+          sourceNode?.data?.integrationId as string | undefined,
+          integrationsById
+        );
+        const targetColor = integrationHex(
+          targetNode?.data?.integrationId as string | undefined,
+          integrationsById
+        );
+        return addEdge(
           {
             ...params,
             animated: true,
             type: 'gradient',
+            data: { sourceColor, targetColor },
           },
           eds
-        )
-      );
+        );
+      });
     },
-    [setEdges]
+    [setEdges, nodes, integrationsById]
   );
 
   const onDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
@@ -290,7 +321,7 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
       const integrationId = event.dataTransfer.getData('integrationId');
       if (!integrationId) return;
 
-      const integration = integrations.find((i) => i.id === integrationId);
+      const integration = integrationsById.get(integrationId);
       if (!integration) return;
 
       const position = screenToFlowPosition({
@@ -300,7 +331,7 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
 
       setModal({ integration, position });
     },
-    [screenToFlowPosition]
+    [screenToFlowPosition, integrationsById]
   );
 
   const handleModalConfirm = useCallback(
@@ -345,6 +376,14 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
             (e) => e.source === triggers[0].id && e.target === actions[0].id
           );
           if (!edgeExists) {
+            const sourceColor = integrationHex(
+              triggers[0].data?.integrationId as string | undefined,
+              integrationsById
+            );
+            const targetColor = integrationHex(
+              actions[0].data?.integrationId as string | undefined,
+              integrationsById
+            );
             setEdges((eds) =>
               addEdge(
                 {
@@ -353,6 +392,7 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
                   target: actions[0].id,
                   animated: true,
                   type: 'gradient',
+                  data: { sourceColor, targetColor },
                 },
                 eds
               )
@@ -369,7 +409,7 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
       setSelectedNode(newNode);
       setModal(null);
     },
-    [modal, setNodes, setEdges, edges, fitView, handleDeleteNode, handleSelectNode]
+    [modal, setNodes, setEdges, edges, fitView, handleDeleteNode, handleSelectNode, integrationsById]
   );
 
   const handlePaneClick = useCallback(() => {
