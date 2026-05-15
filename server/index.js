@@ -497,6 +497,33 @@ async function migrate() {
     WHERE a.id = a2.id AND (a.trigger_integration_type IS NULL OR a.action_integration_type IS NULL)
   `);
   console.log('[migrate] automation integration types ready');
+
+  // Apply SQL files under server/migrations. Each statement runs separately so
+  // CREATE INDEX CONCURRENTLY is permitted (cannot run inside a transaction).
+  try {
+    const migrationsDir = join(__dirname, 'migrations');
+    if (fs.existsSync(migrationsDir)) {
+      const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+      for (const file of files) {
+        const sql = fs.readFileSync(join(migrationsDir, file), 'utf-8');
+        const statements = sql
+          .split(/;\s*(?:\r?\n|$)/)
+          .map((s) => s.replace(/--.*$/gm, '').trim())
+          .filter(Boolean);
+        for (const stmt of statements) {
+          try {
+            await pool.query(stmt);
+          } catch (err) {
+            // IF NOT EXISTS should make this idempotent; log and continue.
+            console.error(`[migrate] ${file} stmt failed: ${err.message}`);
+          }
+        }
+        console.log(`[migrate] applied ${file} (${statements.length} stmts)`);
+      }
+    }
+  } catch (err) {
+    console.error('[migrate] index migrations error:', err.message);
+  }
 }
 
 // GET /api/connections - list all
