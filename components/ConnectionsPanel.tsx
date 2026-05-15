@@ -36,6 +36,14 @@ export default function ConnectionsPanel({ onClose, focusId }: ConnectionsPanelP
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
   const getStatus = useCallback(
     (id: string): ConnectionStatus => {
       if (connectingId === id) return 'connecting';
@@ -191,6 +199,7 @@ export default function ConnectionsPanel({ onClose, focusId }: ConnectionsPanelP
             </div>
             <button
               onClick={onClose}
+              aria-label="Close"
               className="w-8 h-8 rounded-lg bg-[#1a1a1a] hover:bg-[#2a2a2a] flex items-center justify-center text-[#555] hover:text-[#ccc] transition-colors border border-[#2a2a2a] hover:border-[#333]"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
