@@ -1,38 +1,19 @@
 'use client';
 
-import { BaseEdge, EdgeProps, getSmoothStepPath, useReactFlow } from '@xyflow/react';
-import { integrations } from '@/data/integrations';
+import { memo } from 'react';
+import { BaseEdge, EdgeProps, getSmoothStepPath } from '@xyflow/react';
 
-const colorMap: Record<string, string> = {
-  'bg-red-600': '#dc2626',
-  'bg-red-500': '#ef4444',
-  'bg-yellow-500': '#eab308',
-  'bg-gray-800': '#1f2937',
-  'bg-gray-500': '#6b7280',
-  'bg-indigo-500': '#6366f1',
-  'bg-orange-500': '#f97316',
-  'bg-purple-500': '#a855f7',
-  'bg-purple-600': '#9333ea',
-  'bg-emerald-600': '#059669',
-  'bg-blue-500': '#3b82f6',
+type GradientEdgeData = {
+  sourceColor?: string;
+  targetColor?: string;
 };
 
-export default function GradientEdge(props: EdgeProps) {
-  const { id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition } = props;
-  const { getNode } = useReactFlow();
+function GradientEdge(props: EdgeProps) {
+  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data } = props;
 
-  const sourceNode = getNode(source);
-  const targetNode = getNode(target);
-
-  const sourceIntegration = integrations.find(
-    (i) => i.id === (sourceNode?.data as Record<string, unknown>)?.integrationId
-  );
-  const targetIntegration = integrations.find(
-    (i) => i.id === (targetNode?.data as Record<string, unknown>)?.integrationId
-  );
-
-  const sourceColor = colorMap[sourceIntegration?.color || ''] || '#6366f1';
-  const targetColor = colorMap[targetIntegration?.color || ''] || '#6366f1';
+  const edgeData = (data || {}) as GradientEdgeData;
+  const sourceColor = edgeData.sourceColor || '#6366f1';
+  const targetColor = edgeData.targetColor || '#6366f1';
 
   const [edgePath] = getSmoothStepPath({
     sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition,
@@ -56,3 +37,5 @@ export default function GradientEdge(props: EdgeProps) {
     </>
   );
 }
+
+export default memo(GradientEdge);
