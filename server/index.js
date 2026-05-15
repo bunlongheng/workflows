@@ -866,9 +866,18 @@ function getHistory() {
   }
 }
 
-app.listen(PORT, async () => {
-  console.log(`[automations-server] Running on port ${PORT}`);
-  await migrate();
-  await seedGmailSeen();
-  startWatcher();
-});
+// Run migrations BEFORE accepting traffic so /api/* doesn't 500 during cold
+// start while ALTER TABLE / CREATE INDEX statements settle.
+(async () => {
+  try {
+    await migrate();
+  } catch (err) {
+    console.error('[startup] migrate failed:', err.message);
+    process.exit(1);
+  }
+  app.listen(PORT, async () => {
+    console.log(`[automations-server] Running on port ${PORT}`);
+    await seedGmailSeen();
+    startWatcher();
+  });
+})();
