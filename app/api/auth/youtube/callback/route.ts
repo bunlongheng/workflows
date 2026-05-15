@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyAndClearOAuthState } from '@/lib/oauth-state';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
@@ -7,16 +8,30 @@ const REDIRECT_URI = process.env.NEXT_PUBLIC_APP_URL
   ? `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/youtube/callback`
   : 'http://localhost:3008/api/auth/youtube/callback';
 
+function errorRedirect(request: NextRequest): NextResponse {
+  const url = new URL('/automations/new?connection=youtube&status=error', request.url);
+  const res = NextResponse.redirect(url);
+  verifyAndClearOAuthState(request, res, 'youtube');
+  return res;
+}
+
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get('code');
   const error = request.nextUrl.searchParams.get('error');
 
   if (error) {
-    return NextResponse.redirect(new URL('/automations/new?connection=youtube&status=error', request.url));
+    return errorRedirect(request);
   }
 
   if (!code || !CLIENT_ID || !CLIENT_SECRET) {
-    return NextResponse.redirect(new URL('/automations/new?connection=youtube&status=error', request.url));
+    return errorRedirect(request);
+  }
+
+  // CSRF: verify state echoed back matches the cookie we set during init.
+  const stateProbe = NextResponse.next();
+  const stateOk = verifyAndClearOAuthState(request, stateProbe, 'youtube');
+  if (!stateOk) {
+    return NextResponse.json({ error: 'Invalid OAuth state' }, { status: 400 });
   }
 
   // Exchange code for tokens
@@ -33,7 +48,7 @@ export async function GET(request: NextRequest) {
   });
 
   if (!tokenRes.ok) {
-    return NextResponse.redirect(new URL('/automations/new?connection=youtube&status=error', request.url));
+    return errorRedirect(request);
   }
 
   const tokens = await tokenRes.json();
@@ -82,12 +97,15 @@ export async function GET(request: NextRequest) {
     console.error('[youtube-callback] Failed to forward tokens to VPS:', err);
   }
 
-  // Redirect back with connection info
+  // Redirect back with connection info.
   const successUrl = new URL('/automations/new', request.url);
   successUrl.searchParams.set('connection', 'youtube');
   successUrl.searchParams.set('status', 'success');
   successUrl.searchParams.set('account', accountName);
   successUrl.searchParams.set('email', accountEmail);
 
-  return NextResponse.redirect(successUrl.toString());
+  const res = NextResponse.redirect(successUrl.toString());
+  // Carry forward the state-cookie deletion onto the success response
+  stateProbe.cookies.getAll().forEach((c) => res.cookies.set(c));
+  return res;
 }
