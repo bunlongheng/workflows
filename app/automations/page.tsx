@@ -71,6 +71,11 @@ function timeAgo(date: string): string {
   return `${days}d ago`;
 }
 
+// Stable style objects — moved out of render so they aren't reallocated per card per render.
+const PAGE_BG_STYLE = { background: '#0f0f0f' } as const;
+const HEADER_STYLE = { height: '52px', background: '#111', borderBottom: '1px solid #1e1e1e' } as const;
+const CARD_STYLE = { background: '#141414' } as const;
+
 export default function AutomationsPage() {
   const router = useRouter();
   const [automations, setAutomations] = useState<Automation[]>([]);
@@ -98,11 +103,11 @@ export default function AutomationsPage() {
   }, []);
 
   return (
-    <div className="min-h-screen" style={{ background: '#0f0f0f' }}>
+    <div className="min-h-screen" style={PAGE_BG_STYLE}>
       {/* Header */}
       <header
         className="flex items-center justify-between px-4 sm:px-6 py-3"
-        style={{ height: '52px', background: '#111', borderBottom: '1px solid #1e1e1e' }}
+        style={HEADER_STYLE}
       >
         <div className="flex items-center gap-3">
           <Link href="/" className="text-[#555] hover:text-[#ccc] transition-colors text-sm">
@@ -145,7 +150,7 @@ export default function AutomationsPage() {
                 key={auto.id}
                 onClick={() => router.push(`/automations/${auto.id}`)}
                 className="rounded-xl border border-[#1e1e1e] hover:border-[#333] transition-colors cursor-pointer"
-                style={{ background: '#141414' }}
+                style={CARD_STYLE}
               >
                 <div className="p-4 sm:p-5">
                   {/* Flow: Trigger -> Action */}
