@@ -12,6 +12,50 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3009;
+
+// --- Bearer-token auth ---
+// All routes require `Authorization: Bearer ${VPS_AUTH_TOKEN}`.
+// If VPS_AUTH_TOKEN is unset/empty, auth is bypassed (with a startup warn) so
+// local-dev runs keep working without setup.
+//
+// TODO (Next.js side, not owned by this agent): when VPS_AUTH_TOKEN is set,
+// the proxy/server routes that call this VPS need to forward the header.
+// Files to update:
+//   - app/api/automations/route.ts
+//   - app/api/automations/[id]/route.ts
+//   - app/api/automations/log/route.ts
+//   - app/api/connections/route.ts
+//   - app/api/connections/[integrationId]/route.ts
+//   - app/api/youtube/* (connect, disconnect, processed, status, process, token)
+//   - app/api/gmail/* (connect, disconnect, search)
+//   - any client SSE wiring that hits /api/events
+const VPS_AUTH_TOKEN = process.env.VPS_AUTH_TOKEN || '';
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '';
+
+if (!VPS_AUTH_TOKEN) {
+  console.warn('[auth] VPS_AUTH_TOKEN is empty - bearer auth is DISABLED (dev mode)');
+}
+if (!ALLOWED_ORIGIN) {
+  console.warn('[cors] ALLOWED_ORIGIN is empty - SSE will fall back to "*"');
+}
+
+app.use((req, res, next) => {
+  // No auth configured - allow everything (dev)
+  if (!VPS_AUTH_TOKEN) return next();
+
+  // /health stays open for uptime checks
+  if (req.path === '/health') return next();
+
+  // SSE EventSource cannot send custom headers; allow token via query param fallback.
+  if (req.path === '/api/events' && req.query.token === VPS_AUTH_TOKEN) return next();
+
+  const header = req.headers.authorization || '';
+  const expected = `Bearer ${VPS_AUTH_TOKEN}`;
+  if (header !== expected) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  next();
+});
 const CHECK_INTERVAL = process.env.CHECK_INTERVAL_SEC
   ? parseInt(process.env.CHECK_INTERVAL_SEC) * 1000
   : (parseInt(process.env.CHECK_INTERVAL_MIN) || 5) * 60 * 1000;
@@ -500,7 +544,7 @@ app.get('/api/events', (req, res) => {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': ALLOWED_ORIGIN || '*',
   });
   sseClients.add(res);
   req.on('close', () => sseClients.delete(res));
