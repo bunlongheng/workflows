@@ -256,7 +256,9 @@ app.post('/api/automations/log', async (req, res) => {
   }
 });
 
-// List all automations with their integrations and recent logs
+// List all automations with their integrations and recent logs.
+// Uses a single LEFT JOIN against an aggregate of automation_logs to avoid
+// the previous 3-correlated-subquery N+1 pattern.
 app.get('/api/automations/list', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -267,12 +269,21 @@ app.get('/api/automations/list', async (req, res) => {
         COALESCE(ti.type, a.trigger_integration_type) as trigger_integration_type,
         COALESCE(ai.name, a.action_integration_type) as action_integration_name,
         COALESCE(ai.type, a.action_integration_type) as action_integration_type,
-        (SELECT count(*) FROM automation_logs WHERE automation_id = a.id) as total_runs,
-        (SELECT count(*) FROM automation_logs WHERE automation_id = a.id AND result IN ('success', 'ok')) as success_runs,
-        (SELECT triggered_at FROM automation_logs WHERE automation_id = a.id ORDER BY triggered_at DESC LIMIT 1) as last_run
+        COALESCE(l.total_runs, 0) as total_runs,
+        COALESCE(l.success_runs, 0) as success_runs,
+        l.last_run as last_run
       FROM automations a
       LEFT JOIN integrations ti ON a.trigger_integration_id = ti.id
       LEFT JOIN integrations ai ON a.action_integration_id = ai.id
+      LEFT JOIN (
+        SELECT
+          automation_id,
+          count(*) as total_runs,
+          count(*) FILTER (WHERE result IN ('success', 'ok')) as success_runs,
+          max(triggered_at) as last_run
+        FROM automation_logs
+        GROUP BY automation_id
+      ) l ON l.automation_id = a.id
       ORDER BY a.created_at DESC
     `);
     res.json({ automations: result.rows });
