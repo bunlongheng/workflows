@@ -31,29 +31,17 @@ export default function Sidebar({ onOpenConnections }: SidebarProps) {
 
   return (
     <div
-      className="flex flex-col h-full hidden sm:flex"
-      style={{
-        width: '268px',
-        minWidth: '268px',
-        background: '#111',
-        borderRight: '1px solid #222',
-      }}
+      className="flex overflow-x-auto gap-0"
+      style={{ scrollbarWidth: 'none', minHeight: 90 }}
     >
-      <div className="flex-1">
-        <div
-          className="grid grid-cols-2 h-full"
-          style={{ gridAutoRows: '1fr' }}
-        >
-          {sorted.map((integration) => (
-            <IntegrationCard
-              key={integration.id}
-              integration={integration}
-              connected={connectedIds.includes(integration.id)}
-              onConnect={onOpenConnections}
-            />
-          ))}
-        </div>
-      </div>
+      {sorted.map((integration) => (
+        <IntegrationCard
+          key={integration.id}
+          integration={integration}
+          connected={connectedIds.includes(integration.id)}
+          onConnect={onOpenConnections}
+        />
+      ))}
     </div>
   );
 }

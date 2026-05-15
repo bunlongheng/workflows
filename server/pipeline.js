@@ -237,7 +237,7 @@ async function deliverOutput(videoId, meta, result) {
        VALUES ($1, $2, 'YouTube', $3, '#FF3B30', 'markdown', '📺', $4)`,
       [`YT: ${meta.title.slice(0, 50)}`, content, YOUTUBE_FOLDER_ID, STICKIES_USER_ID]
     );
-    console.log(`[output] Saved to Stickies DB: ${title}`);
+    console.log(`[output] Saved to Stickies DB: ${meta.title}`);
   } catch (err) {
     console.error(`[output] Stickies DB error: ${err.message}`);
   }
@@ -304,6 +304,24 @@ async function generateMindMap(title, videoId, result) {
     return;
   }
 
+  // Load config from the active mindmap automation
+  let cfg = {};
+  try {
+    const r = await pool.query(
+      `SELECT action_config FROM automations
+       WHERE active = true AND action_integration_type = 'mindmap'
+       ORDER BY updated_at DESC NULLS LAST, id DESC LIMIT 1`
+    );
+    cfg = r.rows[0]?.action_config || {};
+  } catch (e) {
+    console.warn('[mindmap] Could not load config:', e.message);
+  }
+
+  const mmType = cfg.type || 'logic';
+  const mmLine = cfg.line || 'brace';
+  const titleMax = Math.max(5, Math.min(120, parseInt(cfg.title_max, 10) || 30));
+  const titlePrefix = cfg.title_prefix ? `${cfg.title_prefix} ` : '';
+
   try {
     const rootId = crypto.randomUUID();
     const nodes = [];
@@ -362,12 +380,13 @@ async function generateMindMap(title, videoId, result) {
 
     // Insert into mindmaps table
     const mmResult = await pool.query(
-      `INSERT INTO mindmaps (name, type, line_style, theme_id, nodes, tags, user_id)
-       VALUES ($1, 'mindmap', 'orthogonal', 'default', $2, $3, $4) RETURNING id`,
+      `INSERT INTO mindmaps (name, type, line_style, theme_id, nodes, user_id)
+       VALUES ($1, $2, $3, 'default', $4, $5) RETURNING id`,
       [
-        `YT: ${title.slice(0, 50)}`,
+        `${titlePrefix}${title.slice(0, titleMax)}`,
+        mmType,
+        mmLine,
         JSON.stringify(nodes),
-        result.topics || [],
         DIAGRAMS_USER_ID,
       ]
     );

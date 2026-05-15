@@ -11,15 +11,16 @@ interface NodeConfigPanelProps {
   onUpdateConfig?: (nodeId: string, config: Record<string, string>) => void;
 }
 
-interface ConfigField {
+export interface ConfigField {
   key: string;
   label: string;
   placeholder: string;
   type?: 'text' | 'color' | 'select';
+  defaultValue?: string;
   options?: { value: string; label: string }[];
 }
 
-function getConfigFields(integrationId: string, eventId: string): ConfigField[] {
+export function getConfigFields(integrationId: string, eventId: string): ConfigField[] {
   // Gmail triggers
   if (integrationId === 'gmail') {
     if (eventId.includes('t2')) return [
@@ -38,9 +39,14 @@ function getConfigFields(integrationId: string, eventId: string): ConfigField[] 
       { key: 'query', label: 'Filter (optional)', placeholder: 'e.g. is:unread category:primary' },
     ];
     // Gmail actions
-    return [
-      { key: 'format', label: 'Output format', placeholder: 'summary / full / bullets' },
+    if (eventId.match(/-a1/)) return [
+      { key: 'to', label: 'To address', placeholder: 'e.g. user@example.com' },
+      { key: 'subject', label: 'Subject', placeholder: 'e.g. Alert: {{trigger}}' },
     ];
+    if (eventId.match(/-a3/)) return [
+      { key: 'label', label: 'Label name', placeholder: 'e.g. Important, Automation' },
+    ];
+    return [];
   }
 
   // Hue actions
@@ -84,14 +90,58 @@ function getConfigFields(integrationId: string, eventId: string): ConfigField[] 
   // Diagram / Mindmap
   if (integrationId === 'diagram') {
     return [
-      { key: 'type', label: 'Diagram type', placeholder: 'sequence', type: 'select', options: [
+      { key: 'type', label: 'Diagram type', placeholder: 'sequence', type: 'select', defaultValue: 'sequence', options: [
         { value: 'sequence', label: 'Sequence' }, { value: 'flowchart', label: 'Flowchart' }, { value: 'class', label: 'Class' },
       ]},
     ];
   }
   if (integrationId === 'mindmap') {
     return [
-      { key: 'depth', label: 'Max depth', placeholder: '3' },
+      { key: 'type', label: 'Mind map type', placeholder: 'logic', type: 'select', defaultValue: 'logic', options: [
+        { value: 'mindmap', label: 'Mindmap' },
+        { value: 'logic', label: 'Logic' },
+        { value: 'tree', label: 'Tree' },
+        { value: 'org', label: 'Org Chart' },
+      ]},
+      { key: 'line', label: 'Line style', placeholder: 'brace', type: 'select', defaultValue: 'brace', options: [
+        { value: 'orthogonal', label: 'Orthogonal' },
+        { value: 'brace', label: 'Brace' },
+        { value: 'curve', label: 'Curve' },
+        { value: 'straight', label: 'Straight' },
+      ]},
+      { key: 'title_max', label: 'Title max length', placeholder: '30', defaultValue: '30' },
+      { key: 'title_prefix', label: 'Title prefix (optional)', placeholder: 'e.g. YT:' },
+    ];
+  }
+
+  // Claude
+  if (integrationId === 'claude') {
+    if (eventId.match(/-a\d/)) return [
+      { key: 'api_key', label: 'API Key', placeholder: 'sk-ant-...' },
+      { key: 'model', label: 'Model', placeholder: 'claude-sonnet-4-6', type: 'select', defaultValue: 'claude-sonnet-4-6', options: [
+        { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+        { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+        { value: 'claude-opus-4-6', label: 'Opus 4.6' },
+      ]},
+      { key: 'prompt', label: 'Prompt', placeholder: 'e.g. Summarize this email in 3 bullet points' },
+    ];
+    return [
+      { key: 'api_key', label: 'API Key', placeholder: 'sk-ant-...' },
+    ];
+  }
+
+  // Open Claw (Telegram bot)
+  if (integrationId === 'openclaw') {
+    if (eventId.includes('a1')) return [
+      { key: 'bot_token', label: 'Telegram Bot Token', placeholder: '123456:ABC-DEF...' },
+      { key: 'chat_id', label: 'Chat ID', placeholder: 'e.g. -1001234567890' },
+      { key: 'message', label: 'Message template', placeholder: 'e.g. New alert: {{subject}}' },
+    ];
+    if (eventId.includes('t1')) return [
+      { key: 'bot_token', label: 'Telegram Bot Token', placeholder: '123456:ABC-DEF...' },
+    ];
+    return [
+      { key: 'bot_token', label: 'Telegram Bot Token', placeholder: '123456:ABC-DEF...' },
     ];
   }
 
@@ -110,13 +160,14 @@ export default function NodeConfigPanel({ node, onClose, onDelete, onUpdateConfi
   const fields = getConfigFields(integrationId, eventId);
   const isTrigger = node?.type === 'triggerNode';
 
-  // Load existing config
+  // Load existing config or apply defaults
   useEffect(() => {
-    if (nodeData?.config) {
-      setValues(nodeData.config as Record<string, string>);
-    } else {
-      setValues({});
+    const existing = (nodeData?.config as Record<string, string>) || {};
+    const defaults: Record<string, string> = {};
+    for (const f of fields) {
+      if (f.defaultValue && !existing[f.key]) defaults[f.key] = f.defaultValue;
     }
+    setValues({ ...defaults, ...existing });
   }, [node?.id]);
 
   if (!node || !integration) return null;

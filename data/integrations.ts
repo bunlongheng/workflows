@@ -52,14 +52,13 @@ export const integrations: Integration[] = [
     actions: [
       { id: "stickies-a1", label: "Create Sticky", description: "Post a new sticky note" },
       { id: "stickies-a2", label: "Update Sticky", description: "Update an existing sticky note" },
-      { id: "stickies-a3", label: "Search Stickies", description: "Search sticky notes by keyword" },
     ],
   },
   {
     id: "gmail",
     name: "Gmail",
     icon: "/icons/gmail.svg",
-    color: "bg-red-500",
+    color: "bg-blue-500",
     category: "Communication",
     triggers: [
       { id: "gmail-t1", label: "New Email Received", description: "Fires when a new email arrives in your inbox" },
@@ -69,9 +68,9 @@ export const integrations: Integration[] = [
       { id: "gmail-t5", label: "Search Query Match", description: "Fires when Gmail search query finds new results" },
     ],
     actions: [
-      { id: "gmail-a1", label: "Create Sticky", description: "Save email summary as a sticky note" },
-      { id: "gmail-a2", label: "Create Diagram", description: "Generate a diagram from email content" },
-      { id: "gmail-a3", label: "Create Mind Map", description: "Generate a mind map from email content" },
+      { id: "gmail-a1", label: "Send Email", description: "Send an email via Gmail" },
+      { id: "gmail-a2", label: "Archive Email", description: "Archive the matched email" },
+      { id: "gmail-a3", label: "Label Email", description: "Apply a label to the matched email" },
     ],
   },
   {
@@ -89,7 +88,7 @@ export const integrations: Integration[] = [
     actions: [
       { id: "github-a1", label: "Create Issue", description: "Create a new GitHub issue" },
       { id: "github-a2", label: "Comment on PR", description: "Add a comment to a pull request" },
-      { id: "github-a3", label: "Star Repo", description: "Star a GitHub repository" },
+      { id: "github-a3", label: "Create PR", description: "Open a pull request on a repository" },
     ],
   },
   {
@@ -103,14 +102,13 @@ export const integrations: Integration[] = [
     ],
     actions: [
       { id: "diagram-a1", label: "Create Diagram", description: "Generate a diagram from structured data" },
-      { id: "diagram-a2", label: "Export Diagram", description: "Export diagram as PNG or SVG" },
     ],
   },
   {
     id: "hue",
     name: "Philips Hue",
     icon: "/icons/hue.svg",
-    color: "bg-orange-500",
+    color: "bg-green-600",
     category: "Smart Home",
     triggers: [
       { id: "hue-t1", label: "Motion Detected", description: "Fires when a Hue motion sensor detects movement" },
@@ -134,24 +132,36 @@ export const integrations: Integration[] = [
     ],
     actions: [
       { id: "mindmap-a1", label: "Create Mind Map", description: "Generate a mind map from content" },
-      { id: "mindmap-a2", label: "Expand Branch", description: "Add sub-topics to a mind map branch" },
     ],
   },
   {
-    id: "pipeline",
-    name: "Pipeline",
-    icon: "/icons/ai-processing.svg",
-    color: "bg-emerald-600",
-    category: "Core",
+    id: "claude",
+    name: "Claude",
+    icon: "/icons/claude.svg",
+    color: "bg-orange-500",
+    category: "AI",
     triggers: [
-      { id: "pipeline-t1", label: "Processing Complete", description: "Fires when the pipeline finishes processing content" },
+      { id: "claude-t1", label: "Response Complete", description: "Fires when Claude finishes generating a response" },
     ],
     actions: [
-      { id: "pipeline-a1", label: "Summarize Content", description: "Generate a concise summary from text or transcript" },
-      { id: "pipeline-a2", label: "Extract Top Ideas", description: "Pull out key insights and takeaways from content" },
-      { id: "pipeline-a3", label: "Generate Mind Map", description: "Create a structured mind map from content" },
-      { id: "pipeline-a4", label: "Generate Diagram", description: "Create a sequence diagram from content" },
-      { id: "pipeline-a5", label: "Create Sticky", description: "Save formatted HTML note to Stickies" },
+      { id: "claude-a1", label: "Summarize", description: "Summarize content using Claude" },
+      { id: "claude-a2", label: "Analyze", description: "Analyze and extract insights from content" },
+      { id: "claude-a3", label: "Generate", description: "Generate content from a prompt" },
+      { id: "claude-a4", label: "Classify", description: "Classify or categorize input content" },
+    ],
+  },
+  {
+    id: "openclaw",
+    name: "Open Claw",
+    icon: "/icons/openclaw.svg",
+    color: "bg-red-600",
+    category: "AI",
+    triggers: [
+      { id: "openclaw-t1", label: "Bot Message Received", description: "Fires when your Telegram bot receives a message" },
+    ],
+    actions: [
+      { id: "openclaw-a1", label: "Send Bot Message", description: "Send a message via your Telegram bot" },
+      { id: "openclaw-a2", label: "Run Agent", description: "Execute an Open Claw autonomous agent" },
     ],
   },
   {
@@ -168,7 +178,6 @@ export const integrations: Integration[] = [
     actions: [
       { id: "slack-a1", label: "Send Channel Message", description: "Post a message to a Slack channel" },
       { id: "slack-a2", label: "Send DM", description: "Send a direct message to a user" },
-      { id: "slack-a3", label: "Create Channel", description: "Create a new Slack channel" },
     ],
   },
   {
@@ -183,14 +192,13 @@ export const integrations: Integration[] = [
     ],
     actions: [
       { id: "gcal-a1", label: "Create Event", description: "Create a new calendar event" },
-      { id: "gcal-a2", label: "Update Event", description: "Update an existing calendar event" },
     ],
   },
   {
     id: "webhook",
     name: "Webhook",
     icon: "🔗",
-    color: "bg-gray-500",
+    color: "bg-teal-500",
     category: "Dev",
     triggers: [
       { id: "webhook-t1", label: "Webhook Received", description: "Fires when a webhook payload is received" },
@@ -202,4 +210,4 @@ export const integrations: Integration[] = [
   },
 ];
 
-export const categories = ["All", "My Apps", "Communication", "Productivity", "Dev", "Media"];
+export const categories = ["All", "My Apps", "AI", "Communication", "Productivity", "Dev", "Media"];

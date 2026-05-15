@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { YoutubeTranscript } from 'youtube-transcript';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const STICKIES_URL = 'http://localhost:4444';
-const STICKIES_TOKEN = 'sk_ext_72a5c2daa2602a7ccecddafb04a26e963fd138a2940db174a1c66ac3de5816f9';
+const STICKIES_URL = process.env.STICKIES_URL || 'http://localhost:4444';
+const STICKIES_TOKEN = process.env.STICKIES_TOKEN || '';
 
 export async function POST(request: NextRequest) {
   const { videoId, videoUrl } = await request.json();

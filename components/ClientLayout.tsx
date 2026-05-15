@@ -5,12 +5,14 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import ConnectionsPanel from '@/components/ConnectionsPanel';
+import MobileWizard from '@/components/MobileWizard';
 import { Node } from '@xyflow/react';
 
 const FlowCanvas = dynamic(() => import('@/components/FlowCanvas'), { ssr: false });
 
 export default function ClientLayout() {
   const router = useRouter();
+  const [isMobile, setIsMobile] = useState(false);
   const [triggerCount, setTriggerCount] = useState(0);
   const [flowName, setFlowName] = useState('');
   const [showConnections, setShowConnections] = useState(false);
@@ -53,6 +55,13 @@ export default function ClientLayout() {
         setSaving(false);
         return true;
       }
+      if (res.status === 409) {
+        const err = await res.json().catch(() => ({ error: 'Duplicate automation' }));
+        setToast({ message: err.error || 'This automation already exists', type: 'error' });
+        setTimeout(() => setToast(null), 4000);
+        setSaving(false);
+        return false;
+      }
     } catch {}
     setSaving(false);
     setToast({ message: 'Failed to save', type: 'error' });
@@ -76,6 +85,13 @@ export default function ClientLayout() {
     }
     router.push('/automations');
   }, [saveAutomation, router]);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 640);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -106,6 +122,8 @@ export default function ClientLayout() {
       setTimeout(() => setToast(null), 4000);
     }
   }, []);
+
+  if (isMobile) return <MobileWizard />;
 
   return (
     <div
@@ -147,23 +165,22 @@ export default function ClientLayout() {
             </svg>
             <span className="hidden sm:inline">Automations</span>
           </button>
-          <button
-            onClick={() => { setFocusedIntegration(null); setShowConnections(true); }}
-            className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-xs text-[#888] hover:text-[#f0f0f0] hover:bg-[#1e1e1e] transition-colors"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-            </svg>
-            <span className="hidden sm:inline">Connections</span>
-          </button>
         </div>
       </header>
 
-      {/* Main */}
-      <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 52px)' }}>
-        <Sidebar onOpenConnections={(id) => { setFocusedIntegration(id || null); setShowConnections(true); }} />
-        <FlowCanvas onTriggerCountChange={handleTriggerCountChange} onFlowNameChange={setFlowName} onSave={handleSave} />
+      {/* Main: grids on top, canvas below */}
+      <div className="flex flex-col flex-1 overflow-hidden" style={{ height: 'calc(100vh - 52px)' }}>
+        {/* Integration grid strip */}
+        <div
+          className="flex-shrink-0 overflow-x-auto"
+          style={{ background: '#111', borderBottom: '1px solid #222', scrollbarWidth: 'none' }}
+        >
+          <Sidebar onOpenConnections={(id) => { setFocusedIntegration(id || null); setShowConnections(true); }} />
+        </div>
+        {/* Canvas */}
+        <div className="flex-1 overflow-hidden">
+          <FlowCanvas onTriggerCountChange={handleTriggerCountChange} onFlowNameChange={setFlowName} onSave={handleSave} />
+        </div>
       </div>
 
       {/* Toast */}

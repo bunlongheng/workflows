@@ -67,7 +67,11 @@ function DropModal({ integration, onConfirm, onClose }: DropModalProps) {
         {/* Modal header */}
         <div className={`${integration.color} px-5 py-4 flex items-center justify-between`}>
           <div className="flex items-center gap-3">
-            <span style={{ fontSize: '28px' }}>{integration.icon}</span>
+            {integration.icon.startsWith('/') ? (
+              <img src={integration.icon} alt="" style={{ width: 28, height: 28 }} />
+            ) : (
+              <span style={{ fontSize: '28px' }}>{integration.icon}</span>
+            )}
             <div>
               <p className="text-white font-bold text-lg">{integration.name}</p>
               <p className="text-white/70 text-xs">Choose how to use this integration</p>
@@ -348,8 +352,7 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
                   source: triggers[0].id,
                   target: actions[0].id,
                   animated: true,
-                  type: 'smoothstep',
-                  style: { stroke: '#6366f1', strokeWidth: 2 },
+                  type: 'gradient',
                 },
                 eds
               )
@@ -399,6 +402,7 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
           fitView
           fitViewOptions={{ padding: 0.2 }}
           style={{ background: '#0f0f0f' }}
+          proOptions={{ hideAttribution: true }}
           defaultEdgeOptions={{
             animated: true,
             type: 'gradient',
@@ -442,23 +446,7 @@ function FlowCanvasInner({ onTriggerCountChange, onFlowNameChange, onSave }: Flo
 
         {/* AI Builder */}
 
-        {/* Code toggle button */}
-        <button
-          onClick={() => setShowCode((v) => !v)}
-          className={`absolute bottom-4 right-4 z-10 px-3 py-1.5 rounded-lg text-xs font-mono font-semibold border transition-all ${
-            showCode
-              ? 'bg-amber-900/40 border-amber-700 text-amber-400'
-              : 'bg-[#1a1a1a] border-[#333] text-[#666] hover:text-[#ccc] hover:border-[#555]'
-          }`}
-        >
-          &lt;/&gt; Code
-        </button>
       </div>
-
-      {/* Code panel */}
-      {showCode && (
-        <CodePanel nodes={nodes} edges={edges} onClose={() => setShowCode(false)} />
-      )}
 
       {/* Config panel */}
       {selectedNode && (

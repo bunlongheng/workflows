@@ -102,3 +102,17 @@ body {
   opacity: 0.5;
   cursor: grabbing;
 }
+
+.config-flash {
+  background: transparent;
+  border: 1px solid #2a2a2a;
+  color: #888;
+}
+
+.automation-card {
+  box-shadow: none;
+  transition: box-shadow 0.25s ease-out, transform 0.2s ease-out;
+}
+.automation-card:hover {
+  box-shadow: 0 4px 24px var(--trigger-glow), 0 4px 24px var(--action-glow);
+}

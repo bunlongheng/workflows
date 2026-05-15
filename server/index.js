@@ -222,7 +222,7 @@ app.get('/api/automations/list', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
-        a.id, a.name, a.trigger_type, a.action_type, a.active, a.action_config,
+        a.id, a.name, a.trigger_type, a.action_type, a.active, a.action_config, a.condition,
         a.created_at, a.updated_at,
         COALESCE(ti.name, a.trigger_integration_type) as trigger_integration_name,
         COALESCE(ti.type, a.trigger_integration_type) as trigger_integration_type,
@@ -286,12 +286,22 @@ app.delete('/api/automations/:id', async (req, res) => {
   }
 });
 
-// Toggle automation active/inactive
+// Update automation (toggle active, edit name/condition/action_config)
 app.patch('/api/automations/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { active } = req.body;
-    await pool.query('UPDATE automations SET active = $1, updated_at = now() WHERE id = $2', [active, id]);
+    const { active, name, condition, action_config } = req.body;
+    const sets = [];
+    const vals = [];
+    let idx = 1;
+    if (active !== undefined) { sets.push(`active = $${idx++}`); vals.push(active); }
+    if (name !== undefined) { sets.push(`name = $${idx++}`); vals.push(name); }
+    if (condition !== undefined) { sets.push(`condition = $${idx++}`); vals.push(JSON.stringify(condition)); }
+    if (action_config !== undefined) { sets.push(`action_config = $${idx++}`); vals.push(JSON.stringify(action_config)); }
+    if (sets.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    sets.push(`updated_at = now()`);
+    vals.push(id);
+    await pool.query(`UPDATE automations SET ${sets.join(', ')} WHERE id = $${idx}`, vals);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -305,6 +315,17 @@ app.post('/api/automations', async (req, res) => {
     const { name, trigger_type, trigger_integration_type, action_type, action_integration_type, action_config, condition } = req.body;
     if (!name || !trigger_type || !action_type) {
       return res.status(400).json({ error: 'name, trigger_type, action_type required' });
+    }
+
+    // Prevent duplicates: same trigger+action integration+type combo
+    if (trigger_integration_type && action_integration_type) {
+      const dupe = await pool.query(
+        `SELECT id, name FROM automations WHERE trigger_integration_type = $1 AND action_integration_type = $2 AND trigger_type = $3 AND action_type = $4 LIMIT 1`,
+        [trigger_integration_type, action_integration_type, trigger_type, action_type]
+      );
+      if (dupe.rows.length > 0) {
+        return res.status(409).json({ error: `Duplicate: "${dupe.rows[0].name}" already exists with the same trigger and action` });
+      }
     }
 
     // Look up integration UUIDs by type (best effort)
@@ -537,7 +558,179 @@ function startWatcher() {
   }
 
   setInterval(runCheck, CHECK_INTERVAL);
+  setInterval(runGmailCheck, CHECK_INTERVAL);
   runCheck(); // Run immediately on start
+  runGmailCheck(); // Run immediately on start
+}
+
+// Gmail watcher - polls for active Gmail automations
+const gmailSeenIds = new Set();
+
+// Seed seen IDs from existing logs to prevent re-firing on restart
+async function seedGmailSeen() {
+  try {
+    const result = await pool.query(
+      `SELECT automation_id, trigger_payload FROM automation_logs WHERE via = 'gmail-watcher' ORDER BY triggered_at DESC LIMIT 200`
+    );
+    for (const row of result.rows) {
+      try {
+        const p = typeof row.trigger_payload === 'string' ? JSON.parse(row.trigger_payload) : row.trigger_payload;
+        if (p?.messageId) gmailSeenIds.add(`${row.automation_id}:${p.messageId}`);
+      } catch {}
+    }
+    console.log(`[gmail-watcher] Seeded ${gmailSeenIds.size} seen message IDs`);
+  } catch (err) {
+    console.error('[gmail-watcher] Seed error:', err.message);
+  }
+}
+
+async function getGmailAccessToken() {
+  try {
+    const token = JSON.parse(fs.readFileSync(GMAIL_TOKEN_FILE, 'utf-8'));
+    if (!token.access_token) return null;
+
+    const savedAt = new Date(token.saved_at).getTime();
+    const expiresIn = (token.expires_in || 3600) * 1000;
+    if (Date.now() - savedAt > expiresIn - 60000 && token.refresh_token) {
+      const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: process.env.GOOGLE_CLIENT_ID,
+          client_secret: process.env.GOOGLE_CLIENT_SECRET,
+          refresh_token: token.refresh_token,
+          grant_type: 'refresh_token',
+        }),
+      });
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json();
+        token.access_token = refreshData.access_token;
+        token.saved_at = new Date().toISOString();
+        fs.writeFileSync(GMAIL_TOKEN_FILE, JSON.stringify(token, null, 2));
+      }
+    }
+    return token.access_token;
+  } catch {
+    return null;
+  }
+}
+
+async function runGmailCheck() {
+  const accessToken = await getGmailAccessToken();
+  if (!accessToken) return;
+
+  try {
+    // Find all active Gmail trigger automations
+    const autos = await pool.query(
+      `SELECT id, name, trigger_type, condition, action_type, action_config
+       FROM automations WHERE active = true
+       AND (trigger_integration_type = 'gmail' OR trigger_type IN ('search_query_match', 'subject_match', 'from_match', 'body_match', 'new_email_received'))`
+    );
+    if (autos.rows.length === 0) return;
+
+    for (const auto of autos.rows) {
+      try {
+        const cond = auto.condition || {};
+        let query = '';
+        if (auto.trigger_type === 'search_query_match') {
+          const raw = cond.query || '';
+          // Wrap in quotes for exact phrase match if not already quoted
+          query = raw.startsWith('"') ? raw : `"${raw}"`;
+        }
+        else if (auto.trigger_type === 'subject_match') query = `subject:"${cond.subject || ''}"`;
+        else if (auto.trigger_type === 'from_match') query = `from:${cond.from || ''}`;
+        else if (auto.trigger_type === 'body_match') query = `"${cond.body || ''}"`;
+        else if (auto.trigger_type === 'new_email_received') query = cond.query || 'is:unread';
+        if (!query) continue;
+
+        // Only check emails from the last 2 minutes to avoid historical matches
+        query += ' newer_than:2m';
+
+        const gmailRes = await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=5`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        if (!gmailRes.ok) continue;
+        const data = await gmailRes.json();
+        const messages = data.messages || [];
+
+        for (const msg of messages) {
+          const seenKey = `${auto.id}:${msg.id}`;
+          if (gmailSeenIds.has(seenKey)) continue;
+          gmailSeenIds.add(seenKey);
+
+          // Fetch message details
+          const detailRes = await fetch(
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (!detailRes.ok) continue;
+          const detail = await detailRes.json();
+          const headers = detail.payload?.headers || [];
+          const subject = headers.find(h => h.name === 'Subject')?.value || '';
+          const from = headers.find(h => h.name === 'From')?.value || '';
+
+          console.log(`[gmail-watcher] Match for "${auto.name}": ${subject} from ${from}`);
+          broadcast('gmail_match', { automationId: auto.id, subject, from, messageId: msg.id });
+
+          // Execute action
+          let result = 'success';
+          let detail_text = `Email: "${subject}" from ${from}`;
+          try {
+            await executeAction(auto.action_type, auto.action_config, { subject, from, snippet: detail.snippet, messageId: msg.id });
+          } catch (actionErr) {
+            result = 'error';
+            detail_text = actionErr.message;
+          }
+
+          // Log execution (skip if already logged for this messageId)
+          await pool.query(
+            `INSERT INTO automation_logs (automation_id, automation_name, trigger_payload, result, detail, via)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT DO NOTHING`,
+            [auto.id, auto.name, JSON.stringify({ messageId: msg.id, subject, from }), result, detail_text.slice(0, 500), 'gmail-watcher']
+          );
+          broadcast('logged', { automationId: auto.id, type: 'gmail', subject });
+        }
+      } catch (autoErr) {
+        console.error(`[gmail-watcher] Error for "${auto.name}":`, autoErr.message);
+      }
+    }
+  } catch (err) {
+    console.error('[gmail-watcher] Error:', err.message);
+  }
+}
+
+async function executeAction(actionType, config, triggerData) {
+  console.log(`[action] Executing ${actionType}`, config);
+
+  if (actionType === 'set_color' || actionType === 'flash_lights' || actionType === 'toggle_lights' || actionType === 'set_scene') {
+    // Hue action - call local Hue bridge if available
+    const group = config.group || 'Office';
+    broadcast('hue_action', { actionType, config, trigger: triggerData });
+    console.log(`[hue] ${actionType} - group: ${group}, config:`, config);
+    return { executed: true, actionType, group };
+  }
+
+  if (actionType === 'create_sticky') {
+    const title = triggerData.subject || 'Gmail Automation';
+    const body = triggerData.snippet || triggerData.subject || '';
+    const folder = config.folder || 'Gmail';
+    try {
+      await pool.query(
+        `INSERT INTO stickies (title, body, path, tags) VALUES ($1, $2, $3, $4)`,
+        [title, body, `/${folder}`, ['gmail', 'automation']]
+      );
+      console.log(`[sticky] Created: ${title}`);
+      return { executed: true, title };
+    } catch (err) {
+      console.error('[sticky] Error:', err.message);
+      throw err;
+    }
+  }
+
+  console.log(`[action] Unknown action type: ${actionType}`);
+  return { executed: false, reason: 'unknown_action' };
 }
 
 function extractVideoId(url) {
@@ -558,5 +751,6 @@ function getHistory() {
 app.listen(PORT, async () => {
   console.log(`[automations-server] Running on port ${PORT}`);
   await migrate();
+  await seedGmailSeen();
   startWatcher();
 });
