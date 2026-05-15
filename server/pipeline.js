@@ -2,7 +2,7 @@ import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import fs from 'fs';
-import pg from 'pg';
+import { pool } from './db.js';
 import { markProcessed } from './watcher.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -10,12 +10,6 @@ config({ path: resolve(__dirname, '.env') });
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 console.log(`[pipeline] ANTHROPIC_API_KEY loaded: ${ANTHROPIC_API_KEY ? 'yes' : 'no'}`);
-
-const pool = new pg.Pool({
-  host: '/var/run/postgresql',
-  database: '2026',
-  user: 'postgres',
-});
 
 function getOAuthToken() {
   try {

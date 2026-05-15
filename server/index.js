@@ -167,12 +167,7 @@ app.post('/api/youtube/disconnect', (req, res) => {
 });
 
 // Log automation execution to DB
-import pg from 'pg';
-const pool = new pg.Pool({
-  host: '/var/run/postgresql',
-  database: '2026',
-  user: 'postgres',
-});
+import { pool } from './db.js';
 
 app.post('/api/automations/log', async (req, res) => {
   const { videoId, title, summary, result: resultStr, automationId } = req.body;
