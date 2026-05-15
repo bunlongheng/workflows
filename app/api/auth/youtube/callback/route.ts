@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAndClearOAuthState } from '@/lib/oauth-state';
+import { VPS_URL, vpsAuthHeaders } from '@/lib/vps';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const VPS_URL = process.env.VPS_URL || 'http://45.79.212.154:3009';
 const REDIRECT_URI = process.env.NEXT_PUBLIC_APP_URL
   ? `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/youtube/callback`
   : 'http://localhost:3008/api/auth/youtube/callback';
@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
   try {
     await fetch(`${VPS_URL}/api/youtube/connect`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...vpsAuthHeaders() },
       body: JSON.stringify({
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,

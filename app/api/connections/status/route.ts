@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
+import { VPS_URL, vpsAuthHeaders } from '@/lib/vps';
 
-const VPS_URL = process.env.VPS_URL || 'http://45.79.212.154:3009';
 const STICKIES_URL = 'http://localhost:4444';
 
 interface HealthCheck {
@@ -22,7 +22,7 @@ async function checkStickies(): Promise<HealthCheck> {
 
 async function checkYouTube(): Promise<HealthCheck> {
   try {
-    const res = await fetch(`${VPS_URL}/api/youtube/status`, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(`${VPS_URL}/api/youtube/status`, { signal: AbortSignal.timeout(3000), headers: vpsAuthHeaders() });
     const data = await res.json();
     return {
       id: 'youtube',

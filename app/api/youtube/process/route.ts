@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { YoutubeTranscript } from 'youtube-transcript';
+import { VPS_URL, vpsAuthHeaders } from '@/lib/vps';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const STICKIES_URL = process.env.STICKIES_URL || 'http://localhost:4444';
@@ -225,8 +226,6 @@ ${linksHTML}
   return null;
 }
 
-const VPS_URL = process.env.VPS_URL || 'http://45.79.212.154:3009';
-
 async function logAutomation(videoId: string, title: string, result: { summary?: string }) {
   try {
     let summary = result.summary || '';
@@ -238,7 +237,7 @@ async function logAutomation(videoId: string, title: string, result: { summary?:
 
     await fetch(`${VPS_URL}/api/automations/log`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...vpsAuthHeaders() },
       body: JSON.stringify({
         videoId,
         title,

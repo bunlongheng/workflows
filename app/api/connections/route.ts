@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const VPS_URL = process.env.VPS_URL || 'http://45.79.212.154:3009';
+import { VPS_URL, vpsAuthHeaders } from '@/lib/vps';
 
 export async function GET() {
   try {
-    const res = await fetch(`${VPS_URL}/api/connections`, { cache: 'no-store' });
+    const res = await fetch(`${VPS_URL}/api/connections`, { cache: 'no-store', headers: vpsAuthHeaders() });
     if (!res.ok) throw new Error(`VPS: ${res.status}`);
     const data = await res.json();
     return NextResponse.json(data);
@@ -18,7 +17,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const res = await fetch(`${VPS_URL}/api/connections`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...vpsAuthHeaders() },
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`VPS: ${res.status}`);
@@ -34,6 +33,7 @@ export async function DELETE(request: NextRequest) {
     const { integrationId } = await request.json();
     const res = await fetch(`${VPS_URL}/api/connections/${integrationId}`, {
       method: 'DELETE',
+      headers: vpsAuthHeaders(),
     });
     if (!res.ok) throw new Error(`VPS: ${res.status}`);
     const data = await res.json();

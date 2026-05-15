@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
-
-const VPS_URL = process.env.VPS_URL || 'http://45.79.212.154:3009';
+import { VPS_URL, vpsAuthHeaders } from '@/lib/vps';
 
 export async function GET() {
   try {
-    const res = await fetch(`${VPS_URL}/api/youtube/processed`, { cache: 'no-store' });
+    const res = await fetch(`${VPS_URL}/api/youtube/processed`, { cache: 'no-store', headers: vpsAuthHeaders() });
     if (!res.ok) throw new Error(`VPS: ${res.status}`);
     return NextResponse.json(await res.json());
   } catch (err) {

@@ -1,8 +1,8 @@
-const VPS_URL = process.env.VPS_URL || 'http://45.79.212.154:3009';
+import { VPS_URL, vpsAuthHeaders } from '@/lib/vps';
 
 export async function GET() {
   const upstream = await fetch(`${VPS_URL}/api/events`, {
-    headers: { Accept: 'text/event-stream' },
+    headers: { Accept: 'text/event-stream', ...vpsAuthHeaders() },
   });
 
   return new Response(upstream.body, {

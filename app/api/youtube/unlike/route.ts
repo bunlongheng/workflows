@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { VPS_URL, vpsAuthHeaders } from '@/lib/vps';
 
-const VPS_URL = process.env.VPS_URL || 'http://45.79.212.154:3009';
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 
 async function getValidToken(): Promise<string | null> {
   try {
     // Get token from VPS
-    const res = await fetch(`${VPS_URL}/api/youtube/token`);
+    const res = await fetch(`${VPS_URL}/api/youtube/token`, { headers: vpsAuthHeaders() });
     if (!res.ok) return null;
     const data = await res.json();
 
@@ -33,7 +33,7 @@ async function getValidToken(): Promise<string | null> {
         // Update token on VPS
         await fetch(`${VPS_URL}/api/youtube/connect`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...vpsAuthHeaders() },
           body: JSON.stringify({
             access_token: tokens.access_token,
             refresh_token: data.refresh_token,
