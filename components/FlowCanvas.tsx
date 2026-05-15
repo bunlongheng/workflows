@@ -69,6 +69,14 @@ interface DropModalProps {
 function DropModal({ integration, onConfirm, onClose }: DropModalProps) {
   const [selected, setSelected] = useState<{ type: 'trigger' | 'action'; id: string; label: string } | null>(null);
 
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
@@ -100,6 +108,7 @@ function DropModal({ integration, onConfirm, onClose }: DropModalProps) {
           </div>
           <button
             onClick={onClose}
+            aria-label="Close"
             className="w-8 h-8 rounded-full bg-black/20 hover:bg-black/40 flex items-center justify-center text-white/80 hover:text-white transition-colors"
           >
             ×

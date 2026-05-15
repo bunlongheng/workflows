@@ -170,6 +170,15 @@ export default function NodeConfigPanel({ node, onClose, onDelete, onUpdateConfi
     setValues({ ...defaults, ...existing });
   }, [node?.id]);
 
+  useEffect(() => {
+    if (!node) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [node, onClose]);
+
   if (!node || !integration) return null;
 
   const handleSave = () => {
@@ -197,7 +206,7 @@ export default function NodeConfigPanel({ node, onClose, onDelete, onUpdateConfi
             <p className="text-sm text-[#f0f0f0] font-semibold">{eventLabel}</p>
           </div>
         </div>
-        <button onClick={onClose} className="w-7 h-7 rounded-lg bg-[#2a2a2a] hover:bg-[#333] flex items-center justify-center text-[#888] hover:text-[#f0f0f0] transition-colors text-sm">
+        <button onClick={onClose} aria-label="Close" className="w-7 h-7 rounded-lg bg-[#2a2a2a] hover:bg-[#333] flex items-center justify-center text-[#888] hover:text-[#f0f0f0] transition-colors text-sm">
           x
         </button>
       </div>

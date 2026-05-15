@@ -98,6 +98,7 @@ function ActionNode({ id, data, selected }: NodeProps) {
             e.stopPropagation();
             nodeData.onDelete(id);
           }}
+          aria-label="Delete node"
           className="absolute top-2 right-2 w-5 h-5 rounded-full bg-black/50 hover:bg-red-500 flex items-center justify-center text-white/70 hover:text-white transition-all duration-150 text-xs font-bold z-10"
           style={{ fontSize: '11px', lineHeight: 1 }}
         >
