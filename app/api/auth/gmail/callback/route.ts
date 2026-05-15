@@ -89,12 +89,22 @@ export async function GET(request: NextRequest) {
     console.error('[gmail-callback] Failed to forward tokens:', err);
   }
 
+  // Defensive: assert the redirect target is same-origin. Today the URL is
+  // built from `request.url` so this is by construction, but if a future
+  // change ever sources the target from a query/cookie param this guard
+  // prevents open-redirect attacks.
+  const requestOrigin = new URL(request.url).origin;
   const successUrl = new URL('/automations/new', request.url);
   successUrl.searchParams.set('connection', 'gmail');
   successUrl.searchParams.set('status', 'success');
   successUrl.searchParams.set('account', accountEmail);
 
-  const res = NextResponse.redirect(successUrl.toString());
+  const finalUrl =
+    successUrl.origin === requestOrigin
+      ? successUrl
+      : new URL('/automations/new?connection=gmail&status=success', request.url);
+
+  const res = NextResponse.redirect(finalUrl.toString());
   // Carry forward the state-cookie deletion onto the success response
   stateProbe.cookies.getAll().forEach((c) => res.cookies.set(c));
   return res;
