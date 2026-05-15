@@ -32,6 +32,20 @@ const PORT = process.env.PORT || 3009;
 const VPS_AUTH_TOKEN = process.env.VPS_AUTH_TOKEN || '';
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '';
 
+// Mask an email for log output: "bheng.code@gmail.com" -> "b***@gmail.com".
+// Falls back gracefully if input isn't an email string.
+function maskEmail(e) {
+  if (!e || typeof e !== 'string') return '';
+  // Handle "Name <addr@host>" form by extracting the address.
+  const addrMatch = e.match(/<([^>]+)>/);
+  const addr = addrMatch ? addrMatch[1] : e;
+  const at = addr.indexOf('@');
+  if (at <= 0) return '***';
+  const local = addr.slice(0, at);
+  const domain = addr.slice(at);
+  return `${local[0]}***${domain}`;
+}
+
 if (!VPS_AUTH_TOKEN) {
   console.warn('[auth] VPS_AUTH_TOKEN is empty - bearer auth is DISABLED (dev mode)');
 }
@@ -111,7 +125,7 @@ app.post('/api/youtube/connect', (req, res) => {
   // Set token in watcher
   setOAuthToken(tokenData);
 
-  console.log(`[connect] YouTube connected: ${accountName} (${accountEmail})`);
+  console.log(`[connect] YouTube connected: ${accountName} (${maskEmail(accountEmail)})`);
   res.json({ success: true, message: `Connected as ${accountName}` });
 });
 
@@ -125,7 +139,7 @@ app.post('/api/gmail/connect', (req, res) => {
   const tokenData = { access_token, refresh_token, expires_in, accountEmail, saved_at: new Date().toISOString() };
   if (!fs.existsSync('./data')) fs.mkdirSync('./data', { recursive: true });
   fs.writeFileSync(GMAIL_TOKEN_FILE, JSON.stringify(tokenData, null, 2));
-  console.log(`[gmail] Connected: ${accountEmail}`);
+  console.log(`[gmail] Connected: ${maskEmail(accountEmail)}`);
   res.json({ success: true });
 });
 
@@ -788,7 +802,7 @@ async function runGmailCheck() {
           const subject = headers.find(h => h.name === 'Subject')?.value || '';
           const from = headers.find(h => h.name === 'From')?.value || '';
 
-          console.log(`[gmail-watcher] Match for "${auto.name}": ${subject} from ${from}`);
+          console.log(`[gmail-watcher] Match for "${auto.name}": ${subject} from ${maskEmail(from)}`);
           broadcast('gmail_match', { automationId: auto.id, subject, from, messageId: msg.id });
 
           // Execute action
