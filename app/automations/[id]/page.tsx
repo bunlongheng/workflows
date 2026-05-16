@@ -740,6 +740,18 @@ export default function AutomationDetailPage() {
                           )}
                         </div>
 
+                        {/* Thumbnail (only for video-trigger logs) */}
+                        {thumbnail && (
+                          <img
+                            src={thumbnail}
+                            alt=""
+                            className="rounded-xl flex-shrink-0"
+                            loading="lazy"
+                            decoding="async"
+                            style={{ width: '88px', height: '50px', objectFit: 'cover' }}
+                          />
+                        )}
+
                         {/* Content */}
                         <div className="flex-1 min-w-0">
                           <p className="text-[13px] font-medium text-[#e0e0e0] truncate leading-tight">
