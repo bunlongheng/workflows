@@ -39,6 +39,15 @@ export async function processVideo(videoId) {
   // Step 3: AI Processing
   const result = await aiProcess(meta.title, transcript);
 
+  // Detect AI-level failure: empty ideas/topics AND a summary that admits inability
+  const noIdeas = !result.ideas?.length;
+  const noTopics = !result.topics?.length;
+  const summary = (result.summary || '').toLowerCase();
+  const aiBailed = /transcript (unavailab|not avail|missing)|cannot summarize|no transcript|unable to provide|insufficient (content|information)/.test(summary);
+  if (noIdeas && noTopics && aiBailed) {
+    result.error = 'AI could not extract content from transcript';
+  }
+
   // Step 4: Deliver to Stickies
   await deliverOutput(videoId, meta, result);
 
@@ -51,7 +60,7 @@ export async function processVideo(videoId) {
   // Step 7: Mark as processed
   markProcessed(videoId, meta.title, result);
 
-  console.log(`[pipeline] Done: ${meta.title}`);
+  console.log(`[pipeline] Done: ${meta.title}${result.error ? ` (failed: ${result.error})` : ''}`);
   return { videoId, title: meta.title, ...result };
 }
 

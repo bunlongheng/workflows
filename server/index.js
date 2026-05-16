@@ -639,11 +639,16 @@ function startWatcher() {
             const match = await pool.query(
               `SELECT id, name FROM automations WHERE trigger_type = 'video_liked' AND active = true`
             );
+            const failed = !!result.error;
+            const logResult = failed ? 'failed' : 'success';
+            const detail = failed
+              ? `${result.error}${result.summary ? ` - ${result.summary}` : ''}`
+              : (result.summary || '');
             for (const row of match.rows) {
               await pool.query(
                 `INSERT INTO automation_logs (automation_id, automation_name, trigger_payload, result, detail, via)
                  VALUES ($1, $2, $3, $4, $5, $6)`,
-                [row.id, row.name, JSON.stringify({ videoId: video.videoId, title: video.title, mindmapId: result._mindmapId || null, diagramId: result._diagramId || null }), 'success', (result.summary || '').slice(0, 500), 'watcher']
+                [row.id, row.name, JSON.stringify({ videoId: video.videoId, title: video.title, mindmapId: result._mindmapId || null, diagramId: result._diagramId || null }), logResult, detail.slice(0, 500), 'watcher']
               );
             }
             broadcast('logged', { videoId: video.videoId, automations: match.rows.length });

@@ -229,7 +229,7 @@ ${linksHTML}
   return null;
 }
 
-async function logAutomation(videoId: string, title: string, result: { summary?: string }) {
+async function logAutomation(videoId: string, title: string, result: { summary?: string; error?: string; ideas?: unknown[]; topics?: unknown[] }) {
   try {
     let summary = result.summary || '';
     // Clean JSON wrapper if present
@@ -238,14 +238,22 @@ async function logAutomation(videoId: string, title: string, result: { summary?:
       summary = parsed.summary || summary;
     } catch {}
 
+    const noIdeas = !result.ideas?.length;
+    const noTopics = !result.topics?.length;
+    const aiBailed = /transcript (unavailab|not avail|missing)|cannot summarize|no transcript|unable to provide|insufficient (content|information)/i.test(summary);
+    const failed = !!result.error || (noIdeas && noTopics && aiBailed);
+    const detail = failed
+      ? `${result.error || 'AI could not extract content'}${summary ? ` - ${summary}` : ''}`
+      : summary;
+
     await fetch(`${VPS_URL}/api/automations/log`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...vpsAuthHeaders() },
       body: JSON.stringify({
         videoId,
         title,
-        summary: summary.slice(0, 500),
-        result: 'success',
+        summary: detail.slice(0, 500),
+        result: failed ? 'failed' : 'success',
       }),
     });
   } catch (err) {
