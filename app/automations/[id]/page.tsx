@@ -94,6 +94,7 @@ export default function AutomationDetailPage() {
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [totalLikes, setTotalLikes] = useState(0);
   const [unliking, setUnliking] = useState<string | null>(null);
+  const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
   const [processing, setProcessing] = useState<string | null>(null);
   const [processedIds, setProcessedIds] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<'likes' | 'logs'>('likes');
@@ -231,15 +232,25 @@ export default function AutomationDetailPage() {
         body: JSON.stringify({ videoId }),
       });
       if (res.ok) {
-        setLikes((prev) => prev.filter((v) => v.videoId !== videoId));
+        // Trigger fade-out animation, then remove from list
+        setRemovingIds((prev) => new Set(prev).add(videoId));
         setTotalLikes((prev) => prev - 1);
+        setTimeout(() => {
+          setLikes((prev) => prev.filter((v) => v.videoId !== videoId));
+          setRemovingIds((prev) => {
+            const next = new Set(prev);
+            next.delete(videoId);
+            return next;
+          });
+        }, 280);
       } else {
         showToast('Unlike failed', '#EF4444', true);
+        setUnliking(null);
       }
     } catch {
       showToast('Unlike failed', '#EF4444', true);
+      setUnliking(null);
     }
-    setUnliking(null);
   }
 
   async function handleProcess(videoId: string) {
@@ -596,6 +607,12 @@ export default function AutomationDetailPage() {
                       background: '#141414',
                       boxShadow: '0 2px 10px rgba(0,0,0,0.25)',
                       animationDelay: `${i * 40}ms`,
+                      transition: 'opacity 260ms ease, transform 260ms ease, max-height 260ms ease, padding 260ms ease, margin 260ms ease',
+                      opacity: removingIds.has(video.videoId) ? 0 : 1,
+                      transform: removingIds.has(video.videoId) ? 'translateX(24px)' : 'translateX(0)',
+                      maxHeight: removingIds.has(video.videoId) ? 0 : 200,
+                      overflow: 'hidden',
+                      pointerEvents: removingIds.has(video.videoId) ? 'none' : 'auto',
                     }}
                   >
                     <a href={`https://youtube.com/watch?v=${video.videoId}`} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
@@ -626,10 +643,17 @@ export default function AutomationDetailPage() {
                         disabled={unliking === video.videoId}
                         className="p-1.5 rounded-full hover:bg-[#1e1e1e] transition-colors"
                         title="Unlike"
+                        aria-label="Unlike video"
                       >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="#ef4444" stroke="none">
-                          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                        </svg>
+                        {unliking === video.videoId ? (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#666" strokeWidth="2.5" strokeLinecap="round" className="animate-spin">
+                            <path d="M12 2a10 10 0 0 1 10 10" />
+                          </svg>
+                        ) : (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="#ef4444" stroke="none" style={{ transition: 'fill 200ms ease' }}>
+                            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                          </svg>
+                        )}
                       </button>
                     </div>
                   </div>
