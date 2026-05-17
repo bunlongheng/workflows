@@ -97,8 +97,14 @@ export default function AutomationDetailPage() {
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
   const [processing, setProcessing] = useState<string | null>(null);
   const [processedIds, setProcessedIds] = useState<Set<string>>(new Set());
-  const [tab, setTab] = useState<'likes' | 'logs'>('likes');
+  const [tab, setTab] = useState<'likes' | 'logs' | 'emails'>('likes');
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
+
+  // Gmail manual-run mode
+  const [gmailMessages, setGmailMessages] = useState<{ id: string; subject: string; from: string; date: string; snippet: string }[]>([]);
+  const [gmailLoading, setGmailLoading] = useState(false);
+  const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
+  const [savedMessageIds, setSavedMessageIds] = useState<Set<string>>(new Set());
 
   // Toast
   const [toast, setToast] = useState('');
@@ -147,6 +153,25 @@ export default function AutomationDetailPage() {
             } catch { return null; }
           }).filter(Boolean);
           if (loggedIds.length) setProcessedIds(new Set(loggedIds));
+        }
+        // Gmail manual mode: seed saved messageIds from successful logs + open Emails tab
+        const a = data.automation;
+        const isGmailManual = a?.trigger_integration_type === 'gmail'
+          && a?.action_integration_type === 'stickies'
+          && a?.action_config?.manual === 'true';
+        if (isGmailManual) {
+          const savedIds = (data.logs || [])
+            .filter((log: LogEntry) => log.result === 'success' || log.result === 'ok')
+            .map((log: LogEntry) => {
+              try {
+                const p = typeof log.trigger_payload === 'string' ? JSON.parse(log.trigger_payload) : log.trigger_payload;
+                return p?.messageId;
+              } catch { return null; }
+            })
+            .filter(Boolean);
+          if (savedIds.length) setSavedMessageIds(new Set(savedIds));
+          setTab('emails');
+          fetchGmailMessages();
         }
       })
       .finally(() => setLoading(false));
@@ -221,6 +246,40 @@ export default function AutomationDetailPage() {
       showToast('Failed to load liked videos', '#EF4444', true);
     }
     setLikesLoading(false);
+  }
+
+  async function fetchGmailMessages() {
+    setGmailLoading(true);
+    try {
+      const res = await fetch(`/api/gmail/messages?automationId=${id}`);
+      const data = await res.json();
+      if (Array.isArray(data.messages)) setGmailMessages(data.messages);
+    } catch {
+      showToast('Failed to load emails', '#EF4444', true);
+    }
+    setGmailLoading(false);
+  }
+
+  async function handleSaveMessage(messageId: string) {
+    setSavingMessageId(messageId);
+    try {
+      const res = await fetch('/api/gmail/sticky-from-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ automationId: id, messageId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setSavedMessageIds((prev) => new Set([...prev, messageId]));
+        showToast('Saved to Stickies', '#34C759');
+        refreshLogs();
+      } else {
+        showToast(`Save failed: ${(data.error || '').slice(0, 40)}`, '#EF4444', true);
+      }
+    } catch {
+      showToast('Save failed', '#EF4444', true);
+    }
+    setSavingMessageId(null);
   }
 
   async function handleUnlike(videoId: string) {
@@ -367,6 +426,9 @@ export default function AutomationDetailPage() {
   const triggerColor = colorHex[automation.trigger_integration_type] || '#666';
   const actionColor = colorHex[automation.action_integration_type] || '#666';
   const successCount = logs.filter(l => l.result === 'success' || l.result === 'ok').length;
+  const isGmailManual = automation.trigger_integration_type === 'gmail'
+    && automation.action_integration_type === 'stickies'
+    && automation.action_config?.manual === 'true';
 
   return (
     <div className="min-h-screen" style={{ background: '#0a0a0a' }}>
@@ -591,6 +653,84 @@ export default function AutomationDetailPage() {
             ))}
           </div>
         )}
+        {isGmailManual && (
+          <div className="flex gap-2 mb-4">
+            {(['emails', 'logs'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className="px-4 py-1.5 rounded-full text-[12px] font-semibold transition-all"
+                style={{
+                  background: tab === t ? '#fff' : 'rgba(255,255,255,0.06)',
+                  color: tab === t ? '#000' : '#666',
+                }}
+              >
+                {t === 'emails' ? `Emails (${gmailMessages.length})` : `Logs (${logs.length})`}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Gmail Emails (manual run) */}
+        {isGmailManual && tab === 'emails' && (
+          <div className="space-y-2">
+            {gmailLoading && gmailMessages.length === 0 ? (
+              <div className="text-center py-12 text-[#333] text-sm">Loading emails...</div>
+            ) : gmailMessages.length === 0 ? (
+              <div className="rounded-2xl p-8 text-center" style={{ background: '#141414' }}>
+                <p className="text-[#444] text-sm">No matching emails</p>
+                <p className="text-[#333] text-xs mt-1">No recent emails match this automation&apos;s filter.</p>
+              </div>
+            ) : (
+              gmailMessages.map((msg, i) => {
+                const isSaved = savedMessageIds.has(msg.id);
+                const isSaving = savingMessageId === msg.id;
+                return (
+                  <div
+                    key={msg.id}
+                    className="group flex items-start gap-3 p-3 rounded-2xl transition-all hover:scale-[1.005]"
+                    style={{
+                      background: '#141414',
+                      boxShadow: '0 2px 10px rgba(0,0,0,0.25)',
+                      animationDelay: `${i * 40}ms`,
+                    }}
+                  >
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style={{ background: 'rgba(59,130,246,0.1)' }}>
+                      <img src="/icons/gmail.svg" alt="" className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-medium text-[#e0e0e0] truncate leading-tight">{msg.subject || '(no subject)'}</p>
+                      <p className="text-[11px] text-[#666] truncate mt-0.5">{msg.from}</p>
+                      {msg.snippet && (
+                        <p className="text-[11px] text-[#555] mt-1 line-clamp-2">{msg.snippet}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {isSaved ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-green-400/80 px-2.5 py-1.5 rounded-full" style={{ background: 'rgba(34,197,94,0.1)' }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="3" strokeLinecap="round">
+                            <path d="M20 6L9 17l-5-5" />
+                          </svg>
+                          Saved
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleSaveMessage(msg.id)}
+                          disabled={isSaving}
+                          className="px-3 py-1.5 rounded-full text-[10px] font-semibold text-white transition-all hover:scale-105 disabled:opacity-50"
+                          style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
+                        >
+                          {isSaving ? 'Saving...' : 'Save to Stickies'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
 
         {/* YouTube Likes */}
         {automation.trigger_type === 'video_liked' && tab === 'likes' && (
@@ -677,9 +817,9 @@ export default function AutomationDetailPage() {
         )}
 
         {/* Execution Logs */}
-        {(automation.trigger_type !== 'video_liked' || tab === 'logs') && (
+        {((automation.trigger_type !== 'video_liked' && !isGmailManual) || tab === 'logs') && (
           <div>
-            {automation.trigger_type !== 'video_liked' && (
+            {automation.trigger_type !== 'video_liked' && !isGmailManual && (
               <p className="text-[12px] text-[#555] font-semibold uppercase tracking-wider mb-3">
                 Execution Logs ({logs.length})
               </p>
