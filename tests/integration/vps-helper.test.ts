@@ -64,7 +64,7 @@ describe('vpsGet', () => {
 
     const { vpsGet, VpsError } = await import('../../lib/vps');
 
-    const err = await vpsGet('/api/anything').catch((e) => e);
+    const err = (await vpsGet('/api/anything').catch((e) => e)) as InstanceType<typeof VpsError>;
     expect(err).toBeInstanceOf(VpsError);
     expect(err.status).toBe(500);
     expect(err.name).toBe('VpsError');
