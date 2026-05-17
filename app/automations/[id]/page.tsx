@@ -616,6 +616,7 @@ export default function AutomationDetailPage() {
                     }}
                   >
                     <a href={`https://youtube.com/watch?v=${video.videoId}`} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
+                      {/* TODO: swap to next/image once images.remotePatterns includes i.ytimg.com */}
                       <img src={video.thumbnail} alt="" className="rounded-xl" loading="lazy" decoding="async" style={{ width: '88px', height: '50px', objectFit: 'cover' }} />
                     </a>
                     <div className="flex-1 min-w-0">
@@ -741,6 +742,7 @@ export default function AutomationDetailPage() {
                         </div>
 
                         {/* Thumbnail (only for video-trigger logs) */}
+                        {/* TODO: swap to next/image once images.remotePatterns includes i.ytimg.com */}
                         {thumbnail && (
                           <img
                             src={thumbnail}
@@ -776,6 +778,7 @@ export default function AutomationDetailPage() {
                           {thumbnail && (
                             <div className="flex gap-3 pt-3">
                               <a href={`https://youtube.com/watch?v=${videoId}`} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
+                                {/* TODO: swap to next/image once images.remotePatterns includes i.ytimg.com */}
                                 <img src={thumbnail} alt="" className="rounded-xl" loading="lazy" decoding="async" style={{ width: '110px', height: '62px', objectFit: 'cover' }} />
                               </a>
                               <div className="min-w-0">
