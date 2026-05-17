@@ -86,7 +86,7 @@ function DropModal({ integration, onConfirm, onClose }: DropModalProps) {
       <div
         className="rounded-xl overflow-hidden"
         style={{
-          width: '520px',
+          width: 'min(520px, calc(100% - 2rem))',
           background: '#1a1a1a',
           border: '1px solid #333',
           boxShadow: '0 24px 80px rgba(0,0,0,0.8)',
