@@ -443,7 +443,7 @@ app.post('/api/youtube/process', async (req, res) => {
     res.json({ success: true, result });
   } catch (err) {
     console.error('[process] Error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -538,7 +538,7 @@ app.get('/api/connections', async (req, res) => {
     res.json({ connections: result.rows });
   } catch (err) {
     console.error('[connections] List error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -563,7 +563,7 @@ app.post('/api/connections', async (req, res) => {
     res.json({ connection: result.rows[0] });
   } catch (err) {
     console.error('[connections] Upsert error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -575,7 +575,7 @@ app.delete('/api/connections/:integrationId', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('[connections] Delete error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
