@@ -7,7 +7,21 @@ const config: Config = {
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        'bg-app': '#0f0f0f',
+        'bg-panel': '#1a1a1a',
+        'bg-card': '#141414',
+        'text-primary': '#f0f0f0',
+        'text-secondary': '#a8a8a8',
+        'text-tertiary': '#666',
+        'border-default': '#2a2a2a',
+        'border-strong': '#333',
+        'accent': '#6366f1',
+        'accent-2': '#8b5cf6',
+        'accent-3': '#a855f7',
+      },
+    },
   },
   plugins: [],
   safelist: [
