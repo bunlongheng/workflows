@@ -833,8 +833,12 @@ async function executeAction(actionType, config, triggerData) {
   console.log(`[action] Executing ${actionType}`, config);
 
   if (actionType === 'set_color' || actionType === 'flash_lights' || actionType === 'toggle_lights' || actionType === 'set_scene') {
-    // Hue action - call local Hue bridge if available
-    const group = config.group || 'Office';
+    // Hue action - call local Hue bridge if available.
+    // DB rows persist the bridge group UUID under `group_id`; older drafts /
+    // canvas previews use `group`. Prefer the UUID, fall back to legacy, then 'Office'.
+    // TODO(hue-oauth): wire up OAuth init/callback at app/api/auth/hue/route.ts +
+    // app/api/auth/hue/callback/route.ts (out of scope for this agent).
+    const group = config.group_id || config.group || 'Office';
     broadcast('hue_action', { actionType, config, trigger: triggerData });
     console.log(`[hue] ${actionType} - group: ${group}, config:`, config);
     return { executed: true, actionType, group };
