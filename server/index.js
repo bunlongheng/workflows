@@ -7,6 +7,7 @@ import fs from 'fs';
 import express from 'express';
 import { checkForNewLikes, setOAuthToken } from './watcher.js';
 import { processVideo } from './pipeline.js';
+import { extractVideoId, maskEmail } from './helpers.js';
 
 const app = express();
 app.use(express.json());
@@ -31,20 +32,6 @@ const PORT = process.env.PORT || 3009;
 //   - any client SSE wiring that hits /api/events
 const VPS_AUTH_TOKEN = process.env.VPS_AUTH_TOKEN || '';
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '';
-
-// Mask an email for log output: "bheng.code@gmail.com" -> "b***@gmail.com".
-// Falls back gracefully if input isn't an email string.
-function maskEmail(e) {
-  if (!e || typeof e !== 'string') return '';
-  // Handle "Name <addr@host>" form by extracting the address.
-  const addrMatch = e.match(/<([^>]+)>/);
-  const addr = addrMatch ? addrMatch[1] : e;
-  const at = addr.indexOf('@');
-  if (at <= 0) return '***';
-  const local = addr.slice(0, at);
-  const domain = addr.slice(at);
-  return `${local[0]}***${domain}`;
-}
 
 if (!VPS_AUTH_TOKEN) {
   console.warn('[auth] VPS_AUTH_TOKEN is empty - bearer auth is DISABLED (dev mode)');
@@ -872,12 +859,6 @@ async function executeAction(actionType, config, triggerData) {
 
   console.log(`[action] Unknown action type: ${actionType}`);
   return { executed: false, reason: 'unknown_action' };
-}
-
-function extractVideoId(url) {
-  if (!url) return null;
-  const match = url.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-  return match ? match[1] : null;
 }
 
 function getHistory() {
