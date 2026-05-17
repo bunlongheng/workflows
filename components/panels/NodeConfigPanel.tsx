@@ -167,6 +167,8 @@ export default function NodeConfigPanel({ node, onClose, onDelete, onUpdateConfi
     for (const f of fields) {
       if (f.defaultValue && !existing[f.key]) defaults[f.key] = f.defaultValue;
     }
+    // TODO(NodeConfigPanel.tsx:170): derive merged values via useMemo instead of effect+setState — current pattern triggers cascading render on node switch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setValues({ ...defaults, ...existing });
   }, [node?.id]);
 
