@@ -230,6 +230,7 @@ export default function ConnectionsPanel({ onClose, focusId }: ConnectionsPanelP
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 rounded-lg text-sm bg-[#0a0a0a] border border-[#2a2a2a] text-[#f0f0f0] placeholder-[#444] focus:outline-none focus:border-[#6366f1] transition-colors"
+                style={{ fontSize: 16 }}
               />
             </div>
             <div className="flex rounded-lg border border-[#2a2a2a] overflow-hidden">
