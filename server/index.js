@@ -8,6 +8,7 @@ import express from 'express';
 import { checkForNewLikes, setOAuthToken } from './watcher.js';
 import { processVideo } from './pipeline.js';
 import { extractVideoId, maskEmail } from './helpers.js';
+import { extractText } from './email-text.js';
 
 const app = express();
 app.use(express.json());
@@ -199,6 +200,163 @@ app.get('/api/gmail/search', async (req, res) => {
   } catch (err) {
     console.error('[gmail/search] error:', err.message);
     res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// Build a Gmail search query string from an automation row (trigger_type + condition).
+// Returns '' if the automation has no usable condition.
+function buildGmailQueryForAutomation(triggerType, condition) {
+  const cond = condition || {};
+  if (triggerType === 'search_query_match') {
+    const raw = cond.query || '';
+    if (!raw) return '';
+    return raw.startsWith('"') ? raw : `"${raw}"`;
+  }
+  if (triggerType === 'subject_match') return cond.subject ? `subject:"${cond.subject}"` : '';
+  if (triggerType === 'from_match') return cond.from ? `from:${cond.from}` : '';
+  if (triggerType === 'body_match') return cond.body ? `"${cond.body}"` : '';
+  if (triggerType === 'new_email_received') return cond.query || 'is:unread';
+  return '';
+}
+
+// Recursively pull text/plain (preferred) or text/html out of a Gmail message payload.
+function extractGmailBody(payload) {
+  if (!payload) return { text: '', html: '' };
+  let text = '';
+  let html = '';
+  const visit = (part) => {
+    if (!part) return;
+    const mime = part.mimeType || '';
+    const dataB64 = part.body?.data;
+    if (dataB64) {
+      try {
+        const decoded = Buffer.from(dataB64.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');
+        if (mime === 'text/plain' && !text) text = decoded;
+        else if (mime === 'text/html' && !html) html = decoded;
+      } catch {}
+    }
+    if (Array.isArray(part.parts)) part.parts.forEach(visit);
+  };
+  visit(payload);
+  return { text, html };
+}
+
+// GET /api/gmail/messages?automationId=<id>
+// List recent Gmail messages matching an automation's condition. Used by the
+// manual-run UI to show "what would trigger this if it were auto".
+app.get('/api/gmail/messages', async (req, res) => {
+  const { automationId } = req.query;
+  if (!automationId) return res.status(400).json({ error: 'automationId required' });
+
+  try {
+    const autoRes = await pool.query(
+      `SELECT id, trigger_type, condition FROM automations WHERE id = $1`,
+      [automationId]
+    );
+    if (autoRes.rows.length === 0) return res.status(404).json({ error: 'automation not found' });
+    const auto = autoRes.rows[0];
+
+    const query = buildGmailQueryForAutomation(auto.trigger_type, auto.condition);
+    if (!query) return res.json({ messages: [] });
+
+    const accessToken = await getGmailAccessToken();
+    if (!accessToken) return res.status(401).json({ error: 'Gmail not connected' });
+
+    const gmailRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=20`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!gmailRes.ok) return res.status(gmailRes.status).json({ error: 'Gmail API error' });
+    const data = await gmailRes.json();
+
+    const messages = [];
+    for (const msg of (data.messages || []).slice(0, 20)) {
+      const detailRes = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (!detailRes.ok) continue;
+      const d = await detailRes.json();
+      const headers = d.payload?.headers || [];
+      messages.push({
+        id: msg.id,
+        threadId: msg.threadId,
+        subject: headers.find((h) => h.name === 'Subject')?.value || '',
+        from: headers.find((h) => h.name === 'From')?.value || '',
+        date: headers.find((h) => h.name === 'Date')?.value || '',
+        snippet: d.snippet || '',
+      });
+    }
+    res.json({ messages });
+  } catch (err) {
+    console.error('[gmail/messages] error:', err.message);
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// POST /api/gmail/sticky-from-message
+// Manual run: fetch the full message, extract clean text, save to stickies, log it.
+// Body: { automationId, messageId }
+app.post('/api/gmail/sticky-from-message', async (req, res) => {
+  const { automationId, messageId } = req.body || {};
+  if (!automationId || !messageId) {
+    return res.status(400).json({ error: 'automationId and messageId required' });
+  }
+
+  let autoName = '';
+  try {
+    const autoRes = await pool.query(
+      `SELECT id, name, action_config FROM automations WHERE id = $1`,
+      [automationId]
+    );
+    if (autoRes.rows.length === 0) return res.status(404).json({ error: 'automation not found' });
+    autoName = autoRes.rows[0].name || '';
+    const actionConfig = autoRes.rows[0].action_config || {};
+    const folder = actionConfig.folder || 'Gmail';
+
+    const accessToken = await getGmailAccessToken();
+    if (!accessToken) return res.status(401).json({ error: 'Gmail not connected' });
+
+    const msgRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!msgRes.ok) return res.status(msgRes.status).json({ error: 'Gmail API error' });
+    const msg = await msgRes.json();
+
+    const headers = msg.payload?.headers || [];
+    const subject = headers.find((h) => h.name === 'Subject')?.value || '(no subject)';
+    const from = headers.find((h) => h.name === 'From')?.value || '';
+    const { text, html } = extractGmailBody(msg.payload);
+    const cleanText = extractText(text || html || msg.snippet || '', subject);
+
+    // Same shape pipeline.js uses for stickies insert
+    const STICKIES_USER_ID = '47a18fff-a0c4-4f18-b0f0-40821c18793d';
+    const stickyRes = await pool.query(
+      `INSERT INTO stickies (title, content, folder_name, folder_color, type, icon, user_id)
+       VALUES ($1, $2, $3, '#3b82f6', 'markdown', '📧', $4) RETURNING id`,
+      [subject.slice(0, 200), cleanText, folder, STICKIES_USER_ID]
+    );
+    const stickyId = stickyRes.rows[0]?.id;
+
+    await pool.query(
+      `INSERT INTO automation_logs (automation_id, automation_name, trigger_payload, result, detail, via)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [automationId, autoName, JSON.stringify({ messageId, subject, from, stickyId }), 'success', `Saved "${subject}" to Stickies/${folder}`.slice(0, 500), 'manual']
+    );
+    broadcast('logged', { automationId, type: 'gmail', subject, manual: true });
+
+    res.json({ ok: true, stickyId });
+  } catch (err) {
+    console.error('[gmail/sticky-from-message] error:', err.message);
+    try {
+      await pool.query(
+        `INSERT INTO automation_logs (automation_id, automation_name, trigger_payload, result, detail, via)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [automationId, autoName, JSON.stringify({ messageId }), 'failed', err.message.slice(0, 500), 'manual']
+      );
+    } catch {}
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -800,6 +958,20 @@ async function runGmailCheck() {
 
           console.log(`[gmail-watcher] Match for "${auto.name}": ${subject} from ${maskEmail(from)}`);
           broadcast('gmail_match', { automationId: auto.id, subject, from, messageId: msg.id });
+
+          // Manual mode: don't auto-execute. Just log as pending so the user
+          // sees it queued and can trigger it from the UI.
+          const isManual = auto.action_config?.manual === true || auto.action_config?.manual === 'true';
+          if (isManual) {
+            await pool.query(
+              `INSERT INTO automation_logs (automation_id, automation_name, trigger_payload, result, detail, via)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               ON CONFLICT DO NOTHING`,
+              [auto.id, auto.name, JSON.stringify({ messageId: msg.id, subject, from }), 'pending', 'Waiting for manual run', 'gmail-watcher']
+            );
+            broadcast('logged', { automationId: auto.id, type: 'gmail', subject, pending: true });
+            continue;
+          }
 
           // Execute action
           let result = 'success';

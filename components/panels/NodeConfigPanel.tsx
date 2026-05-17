@@ -15,7 +15,7 @@ export interface ConfigField {
   key: string;
   label: string;
   placeholder: string;
-  type?: 'text' | 'color' | 'select';
+  type?: 'text' | 'color' | 'select' | 'checkbox';
   defaultValue?: string;
   options?: { value: string; label: string }[];
 }
@@ -84,6 +84,7 @@ export function getConfigFields(integrationId: string, eventId: string): ConfigF
   if (integrationId === 'stickies') {
     return [
       { key: 'folder', label: 'Folder', placeholder: 'e.g. YouTube, Gmail, Notes' },
+      { key: 'manual', label: "Manual run only (don't auto-execute)", placeholder: '', type: 'checkbox' },
     ];
   }
 
@@ -228,8 +229,20 @@ export default function NodeConfigPanel({ node, onClose, onDelete, onUpdateConfi
           <div className="space-y-3">
             {fields.map((field) => (
               <div key={field.key}>
-                <label className="block text-[11px] font-medium text-[#888] mb-1.5">{field.label}</label>
-                {field.type === 'color' ? (
+                {field.type !== 'checkbox' && (
+                  <label className="block text-[11px] font-medium text-[#888] mb-1.5">{field.label}</label>
+                )}
+                {field.type === 'checkbox' ? (
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={values[field.key] === 'true'}
+                      onChange={(e) => setValues({ ...values, [field.key]: e.target.checked ? 'true' : '' })}
+                      className="w-4 h-4 rounded border border-[#333] bg-[#0f0f0f] accent-indigo-500 cursor-pointer"
+                    />
+                    <span className="text-[11px] font-medium text-[#888]">{field.label}</span>
+                  </label>
+                ) : field.type === 'color' ? (
                   <div className="flex items-center gap-2">
                     <input
                       type="color"
