@@ -4,6 +4,7 @@ import { dirname, resolve } from 'path';
 import fs from 'fs';
 import { pool } from './db.js';
 import { markProcessed } from './watcher.js';
+import { AI_BAILOUT_REGEX, escapeHtml, parseTimedTextXml } from './pipeline-helpers.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: resolve(__dirname, '.env') });
@@ -43,7 +44,7 @@ export async function processVideo(videoId) {
   const noIdeas = !result.ideas?.length;
   const noTopics = !result.topics?.length;
   const summary = (result.summary || '').toLowerCase();
-  const aiBailed = /transcript (unavailab|not avail|missing)|cannot summarize|no transcript|unable to provide|insufficient (content|information)/.test(summary);
+  const aiBailed = AI_BAILOUT_REGEX.test(summary);
   if (noIdeas && noTopics && aiBailed) {
     result.error = 'AI could not extract content from transcript';
   }
@@ -128,15 +129,6 @@ async function fetchViaPublicAPI(videoId) {
   const xml = await res.text();
   if (!xml.includes('<text')) return null;
   return parseTimedTextXml(xml);
-}
-
-function parseTimedTextXml(xml) {
-  const matches = xml.match(/<text[^>]*>(.*?)<\/text>/gs) || [];
-  const texts = matches.map((m) => {
-    return m.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\n/g, ' ').trim();
-  });
-  const joined = texts.join(' ').replace(/\s+/g, ' ').trim();
-  return joined || null;
 }
 
 async function getVideoMeta(videoId) {
@@ -249,18 +241,6 @@ async function deliverOutput(videoId, meta, result) {
   // Also save to local file as backup
   if (!fs.existsSync('./data/outputs')) fs.mkdirSync('./data/outputs', { recursive: true });
   fs.writeFileSync(`./data/outputs/${videoId}.html`, content);
-}
-
-// Escape user/AI-supplied strings before embedding into HTML.
-// Stickies renders this content as HTML, so unescaped values are an XSS vector.
-function escapeHtml(s) {
-  if (s === null || s === undefined) return '';
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function formatAsHTML(meta, videoId, result) {

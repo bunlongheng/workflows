@@ -8,6 +8,7 @@ server/node_modules
 
 # testing
 /coverage
+.vitest-cache/
 
 # next.js
 /.next/
