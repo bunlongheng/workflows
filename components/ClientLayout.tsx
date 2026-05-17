@@ -113,8 +113,11 @@ export default function ClientLayout() {
           },
         ];
         localStorage.setItem('wf_connections', JSON.stringify(updated));
+        // TODO(ClientLayout.tsx:116): move toast trigger out of effect — fires on URL-param-driven side effect after OAuth redirect, refactor to event handler.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setToast({ message: `${account || connection} connected`, type: 'success' });
       } else {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setToast({ message: `Failed to connect ${connection}`, type: 'error' });
       }
 
