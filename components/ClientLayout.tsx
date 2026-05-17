@@ -191,6 +191,7 @@ export default function ClientLayout() {
             background: toast.type === 'success' ? '#052e16' : '#450a0a',
             border: `1px solid ${toast.type === 'success' ? '#16a34a' : '#dc2626'}`,
             color: toast.type === 'success' ? '#4ade80' : '#fca5a5',
+            marginBottom: 'env(safe-area-inset-bottom)',
           }}
         >
           {toast.type === 'success' ? (
