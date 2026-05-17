@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "lint": "next lint",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepare": "husky || true"
@@ -27,6 +27,8 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.0.1",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.6",
     "express": "^5.2.1",
     "postcss": "^8",
     "supertest": "^7.2.2",
