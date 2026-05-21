@@ -105,4 +105,68 @@ describe('extractText', () => {
     expect(out).not.toContain('Are you free this week');
     expect(out).not.toMatch(/Best,\s*\nAlice/);
   });
+
+  it('cleans a multi-message Gmail thread (headers, repeated sigs, promo, quotes, dupes)', () => {
+    const thread = [
+      'Bunlong Heng <bheng.code@gmail.com>    Sun, Mar 29, 2026 at 4:04 PM',
+      'To: Kevin Dong <ydong@biossusa.com>',
+      'Hi Kevin,',
+      '',
+      'I wanted to flag some security concerns.',
+      '',
+      '--',
+      'Best regard,',
+      '',
+      'Bunlong Heng',
+      'bheng.code@gmail.com',
+      '9786770861',
+      '',
+      'Kevin Dong <ydong@biossusa.com>    Sun, Mar 29, 2026 at 4:06 PM',
+      'To: Bunlong Heng <bheng.code@gmail.com>',
+      'Agreed!',
+      '[Quoted text hidden]',
+      'David Mello <davidm@biossusa.com>    Mon, Mar 30, 2026 at 10:52 AM',
+      'Hi Bunlong,',
+      '',
+      'Can you confirm Laravel versions?',
+      '',
+      'Best regards,',
+      'David',
+      '--',
+      'David Mello',
+      'Director of Sales & Marketing | Bioss Antibodies',
+      '300 Trade Center Drive, Suite 4610, Woburn, MA 01801',
+      'Published Antibodies Sale',
+      '',
+      '25% off Published Antibodies with code: PUB25',
+      'Free Shipping on Orders Over $1,000',
+      '',
+      'On Mon, Mar 30, 2026 at 10:04 AM Kevin Dong <ydong@biossusa.com> wrote:',
+      'Any thoughts?',
+      '[Quoted text hidden]',
+      '--',
+      'Best regard,',
+      '',
+      'Bunlong Heng',
+      'bheng.code@gmail.com',
+      '9786770861',
+    ].join('\n');
+
+    const out = extractText(thread);
+    // Core messages preserved
+    expect(out).toContain('Hi Kevin,');
+    expect(out).toContain('I wanted to flag some security concerns.');
+    expect(out).toContain('Agreed!');
+    expect(out).toContain('Can you confirm Laravel versions?');
+    expect(out).toContain('Any thoughts?');
+    // Signatures stripped (phone appears twice in source - gone entirely)
+    expect(out).not.toContain('9786770861');
+    // Promo footer stripped
+    expect(out).not.toContain('PUB25');
+    expect(out).not.toMatch(/Free Shipping on Orders/);
+    // Headers + quote markers stripped
+    expect(out).not.toContain('<bheng.code@gmail.com>');
+    expect(out).not.toMatch(/quoted text hidden/i);
+    expect(out).not.toMatch(/^To:/m);
+  });
 });

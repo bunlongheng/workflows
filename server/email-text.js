@@ -154,8 +154,114 @@ function collapseWhitespace(text) {
   return s.trim();
 }
 
+// A line that opens a message in an expanded Gmail thread:
+// "Bunlong Heng <bheng.code@gmail.com>    Sun, Mar 29, 2026 at 4:04 PM"
+const MSG_HEADER_RE = /<[^>]+@[^>]+>.*\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mon|Tue|Wed|Thu|Fri|Sat)\b/i;
+// Routing header lines
+const ROUTE_HEADER_RE = /^(to|cc|bcc|from|sent|date|subject|reply-to):\s/i;
+// Marketing/promo footer markers (Bioss-specific + generic)
+const PROMO_RE = /(published antibodies sale|view our current promotions|free shipping on orders over|with code:\s*\w+|^\s*\d+% off\b|receive your first .* trial size)/i;
+const QUOTED_HIDDEN_RE = /\[\s*quoted text hidden\s*\]/i;
+const HARD_SIG_SEP_RE = /^--\s*$/;
+
+// True when the input looks like a multi-message expanded thread (several
+// "Name <email>  Date" headers).
+function isThread(text) {
+  const matches = text.match(new RegExp(MSG_HEADER_RE.source, 'gi'));
+  return matches && matches.length >= 2;
+}
+
+// A boundary line ends a sig/promo block without being consumed by it.
+function isBlockBoundary(t) {
+  return (
+    MSG_HEADER_RE.test(t) ||
+    QUOTED_HIDDEN_RE.test(t) ||
+    REPLY_INTRO_PATTERNS.some((re) => re.test(t))
+  );
+}
+
+// Skip a signature block: from a "--" separator, drop following lines
+// (name/email/phone/title/address) until a block boundary or a 2nd blank gap.
+function skipSignatureBlock(lines, start) {
+  let i = start + 1;
+  let blanks = 0;
+  while (i < lines.length) {
+    const t = lines[i].trim();
+    if (isBlockBoundary(t)) break; // next message / quote starts - don't consume
+    if (t === '') {
+      blanks++;
+      if (blanks >= 2) { i++; break; }
+      i++;
+      continue;
+    }
+    blanks = 0;
+    i++;
+  }
+  return i;
+}
+
+// Skip a promo/marketing footer until a block boundary or a 2nd blank gap.
+function skipPromoBlock(lines, start) {
+  let i = start + 1;
+  let blanks = 0;
+  while (i < lines.length) {
+    const t = lines[i].trim();
+    if (isBlockBoundary(t)) break;
+    if (t === '') {
+      blanks++;
+      if (blanks >= 2) { i++; break; }
+      i++;
+      continue;
+    }
+    blanks = 0;
+    i++;
+  }
+  return i;
+}
+
+// Thread-aware clean: strip headers, sig blocks, promo blocks, quoted replies,
+// "[Quoted text hidden]" markers, then dedupe repeated paragraphs.
+function cleanThread(text) {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  const kept = [];
+  let i = 0;
+  while (i < lines.length) {
+    const raw = lines[i];
+    const t = raw.trim();
+
+    if (HARD_SIG_SEP_RE.test(t)) { i = skipSignatureBlock(lines, i); continue; }
+    if (PROMO_RE.test(t)) { i = skipPromoBlock(lines, i); continue; }
+    if (QUOTED_HIDDEN_RE.test(t)) { i++; continue; }
+    if (/^>+/.test(t)) { i++; continue; }
+    if (REPLY_INTRO_PATTERNS.some((re) => re.test(t))) { i++; continue; }
+    if (MSG_HEADER_RE.test(t)) { i++; continue; }
+    if (ROUTE_HEADER_RE.test(t)) { i++; continue; }
+
+    kept.push(raw);
+    i++;
+  }
+
+  // Dedupe repeated paragraph blocks (signatures/footers that slipped through,
+  // repeated quoted bodies). Blocks are separated by blank lines.
+  const joined = kept.join('\n');
+  const blocks = joined.split(/\n\s*\n/);
+  const seen = new Set();
+  const uniqueBlocks = [];
+  for (const b of blocks) {
+    const norm = b.replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!norm) continue;
+    if (seen.has(norm)) continue; // exact dup block - drop
+    seen.add(norm);
+    uniqueBlocks.push(b.trim());
+  }
+  return uniqueBlocks.join('\n\n');
+}
+
 /**
  * Extract the meaningful text from an email body. Accepts plain text or HTML.
+ * Single message: drops the quoted tail + the author's signature.
+ * Multi-message thread: keeps every author's core message, strips all
+ * signatures/promos/headers/quoted-chains, and dedupes repeated blocks.
  * @param {string} input - raw body (text or HTML)
  * @param {string} [_subject] - subject (currently unused; reserved for future heuristics)
  * @returns {string} cleaned text
@@ -164,6 +270,12 @@ export function extractText(input, _subject) {
   if (!input || typeof input !== 'string') return '';
 
   let text = looksLikeHtml(input) ? htmlToText(input) : input;
+
+  if (isThread(text)) {
+    text = cleanThread(text);
+    return collapseWhitespace(text);
+  }
+
   text = stripQuotedReply(text);
   text = stripSignatures(text);
   text = collapseWhitespace(text);
