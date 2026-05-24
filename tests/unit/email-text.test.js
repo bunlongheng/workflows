@@ -84,6 +84,105 @@ describe('extractText', () => {
     expect(extractText(input)).toContain('Thanks, that worked');
   });
 
+  it('strips "Regards,\\n<name>" sign-off', () => {
+    expect(extractText('Here is the file.\n\nRegards,\nBob')).toBe('Here is the file.');
+  });
+
+  it('strips "Cheers\\n<name>" sign-off (no comma)', () => {
+    expect(extractText('Done.\n\nCheers\nSam')).toBe('Done.');
+  });
+
+  it('strips "Sincerely,\\n<full name>" sign-off', () => {
+    expect(extractText('Letter body.\n\nSincerely,\nJane Doe')).toBe('Letter body.');
+  });
+
+  it('strips "Best regards,\\n<name>" sign-off', () => {
+    expect(extractText('Proposal attached.\n\nBest regards,\nAlice')).toBe(
+      'Proposal attached.'
+    );
+  });
+
+  it('strips "Kind regards,\\n<name>" sign-off', () => {
+    expect(extractText('See you then.\n\nKind regards,\nTom')).toBe('See you then.');
+  });
+
+  it('keeps a "Best, <sentence>" line when no name follows', () => {
+    const input = 'Best, I think we should ship the feature this week regardless.';
+    expect(extractText(input)).toBe(input);
+  });
+
+  it('strips "Sent from my Android" signature', () => {
+    expect(extractText('ok\n\nSent from my Android')).toBe('ok');
+  });
+
+  it('strips "Sent from my iPad" signature', () => {
+    expect(extractText('Reviewed.\n\nSent from my iPad')).toBe('Reviewed.');
+  });
+
+  it('strips "Get the Outlook app" signature', () => {
+    expect(extractText('Confirmed.\n\nGet the Outlook app')).toBe('Confirmed.');
+  });
+
+  it('strips an "___" (underscore rule) forwarded divider and below', () => {
+    expect(extractText('Reply text.\n\n___\nquoted below')).toBe('Reply text.');
+  });
+
+  it('drops a "From:" forwarded header and everything after', () => {
+    expect(extractText('See below.\n\nFrom: a@b.com\nstuff here')).toBe('See below.');
+  });
+
+  it('keeps non-quoted lines interleaved with ">" quoted lines', () => {
+    const input = 'Mine.\n> quoted 1\nstill mine\n> quoted 2';
+    expect(extractText(input)).toBe('Mine.\nstill mine');
+  });
+
+  it('strips multiple levels of ">>" nested quoting', () => {
+    const input = 'My note.\n\n>> deep quote\n> shallow quote';
+    expect(extractText(input)).toBe('My note.');
+  });
+
+  it('normalizes CRLF line endings to LF', () => {
+    expect(extractText('Line A\r\nLine B')).toBe('Line A\nLine B');
+  });
+
+  it('collapses runs of 2+ internal spaces/tabs to a single space', () => {
+    expect(extractText('word     spaced')).toBe('word spaced');
+    expect(extractText('word\t\tspaced')).toBe('word spaced');
+    expect(extractText('word \t spaced')).toBe('word spaced');
+  });
+
+  it('trims trailing whitespace on each line', () => {
+    expect(extractText('Line A   \nLine B\t\t')).toBe('Line A\nLine B');
+  });
+
+  it('decodes &nbsp; entities from HTML to spaces', () => {
+    expect(extractText('<p>a&nbsp;&nbsp;b</p>')).toBe('a b');
+  });
+
+  it('decodes numeric HTML entities (&#39; and &#x27;)', () => {
+    expect(extractText('<p>it&#39;s &#x41;OK</p>')).toBe("it's AOK");
+  });
+
+  it('renders <li> items with a leading dash (when wrapped in a recognized block)', () => {
+    // looksLikeHtml triggers on the <div>; htmlToText then maps <li> -> "- ".
+    const out = extractText('<div><ul><li>first</li><li>second</li></ul></div>');
+    expect(out).toContain('- first');
+    expect(out).toContain('- second');
+  });
+
+  it('does not treat short tagless plain text as HTML', () => {
+    expect(extractText('Just a normal sentence about spans and divs.')).toBe(
+      'Just a normal sentence about spans and divs.'
+    );
+  });
+
+  it('keeps the author message when "[Quoted text hidden]" follows (single-message path)', () => {
+    // Single-message path does not strip the marker (that is thread-only),
+    // but the real reply text is always preserved.
+    const out = extractText('Here is my reply.\n[Quoted text hidden]');
+    expect(out).toContain('Here is my reply.');
+  });
+
   it('collapses 3+ blank lines into 2', () => {
     const input = 'Line one.\n\n\n\n\nLine two.';
     expect(extractText(input)).toBe('Line one.\n\nLine two.');
@@ -168,5 +267,50 @@ describe('extractText', () => {
     expect(out).not.toContain('<bheng.code@gmail.com>');
     expect(out).not.toMatch(/quoted text hidden/i);
     expect(out).not.toMatch(/^To:/m);
+  });
+
+  it('dedupes identical paragraph blocks across a thread', () => {
+    // Blocks are delimited by blank lines; an identical block in two messages
+    // should survive only once after dedupe.
+    const thread = [
+      'Alice Example <alice@x.com>    Mon, Jan 5, 2026 at 9:00 AM',
+      'The deploy is scheduled for Friday.',
+      '',
+      'Bob Example <bob@y.com>    Mon, Jan 5, 2026 at 9:05 AM',
+      'The deploy is scheduled for Friday.',
+      '',
+      'Sounds good to me.',
+    ].join('\n');
+    const out = extractText(thread);
+    const occurrences = out.split('The deploy is scheduled for Friday.').length - 1;
+    expect(occurrences).toBe(1);
+    expect(out).toContain('Sounds good to me.');
+  });
+
+  it('treats a single message-header line as a non-thread (needs 2+ headers)', () => {
+    // Exactly one header -> isThread is false -> single-message path runs.
+    const input = [
+      'Alice <alice@x.com>    Tue, Feb 3, 2026 at 8:00 AM',
+      'Just one message here.',
+    ].join('\n');
+    const out = extractText(input);
+    expect(out).toContain('Just one message here.');
+  });
+
+  it('strips routing headers (To/Cc/Subject) inside a detected thread', () => {
+    const thread = [
+      'Alice <alice@x.com>    Mon, Jan 5, 2026 at 9:00 AM',
+      'Cc: team@x.com',
+      'Subject: Re: status',
+      'First message body.',
+      '',
+      'Bob <bob@y.com>    Mon, Jan 5, 2026 at 9:30 AM',
+      'Second message body.',
+    ].join('\n');
+    const out = extractText(thread);
+    expect(out).toContain('First message body.');
+    expect(out).toContain('Second message body.');
+    expect(out).not.toMatch(/^Cc:/m);
+    expect(out).not.toMatch(/^Subject:/m);
   });
 });

@@ -26,6 +26,40 @@ describe('parseTimedTextXml', () => {
     const xml = '<text>line one\nline   two</text><text>  extra  </text>';
     expect(parseTimedTextXml(xml)).toBe('line one line two extra');
   });
+
+  it('returns null for null / undefined input', () => {
+    expect(parseTimedTextXml(null)).toBeNull();
+    expect(parseTimedTextXml(undefined)).toBeNull();
+  });
+
+  it('parses a single <text> with attributes', () => {
+    expect(parseTimedTextXml('<text dur="1.2" start="0">caption line</text>')).toBe(
+      'caption line'
+    );
+  });
+
+  it('strips inner formatting tags inside a <text> node', () => {
+    expect(parseTimedTextXml('<text><b>bold</b> plain</text>')).toBe('bold plain');
+  });
+
+  it('ignores malformed/unclosed <text> (no match -> null)', () => {
+    expect(parseTimedTextXml('<text>hello')).toBeNull();
+    expect(parseTimedTextXml('<text>')).toBeNull();
+  });
+
+  it('returns null when all <text> nodes are whitespace-only', () => {
+    expect(parseTimedTextXml('<text>   </text><text>\n\t</text>')).toBeNull();
+  });
+
+  it('only decodes one entity layer (nested &amp;amp; -> &amp;)', () => {
+    // Single-pass decode: &amp;amp; -> &amp; (not all the way to &).
+    expect(parseTimedTextXml('<text>a &amp;amp; b</text>')).toBe('a &amp; b');
+  });
+
+  it('decodes a mix of entities across multiple nodes', () => {
+    const xml = '<text>5 &lt; 10</text><text>10 &gt; 5</text><text>&quot;done&quot;</text>';
+    expect(parseTimedTextXml(xml)).toBe('5 < 10 10 > 5 "done"');
+  });
 });
 
 describe('escapeHtml', () => {
@@ -48,6 +82,28 @@ describe('escapeHtml', () => {
 
   it('coerces non-string values to string', () => {
     expect(escapeHtml(42)).toBe('42');
+    expect(escapeHtml(0)).toBe('0');
+    expect(escapeHtml(true)).toBe('true');
+  });
+
+  it('escapes all five special characters in one pass', () => {
+    expect(escapeHtml(`<a href="x"> & 'q' </a>`)).toBe(
+      '&lt;a href=&quot;x&quot;&gt; &amp; &#39;q&#39; &lt;/a&gt;'
+    );
+  });
+
+  it('escapes & first so it does not double-encode the other entities', () => {
+    // If & weren't escaped first, "<" -> "&lt;" then the "&" would be re-escaped.
+    expect(escapeHtml('<')).toBe('&lt;');
+    expect(escapeHtml('&lt;')).toBe('&amp;lt;');
+  });
+
+  it('leaves already-safe text untouched', () => {
+    expect(escapeHtml('plain text 123')).toBe('plain text 123');
+  });
+
+  it('returns empty string for empty string input', () => {
+    expect(escapeHtml('')).toBe('');
   });
 });
 
@@ -64,5 +120,40 @@ describe('AI_BAILOUT_REGEX', () => {
     expect(
       AI_BAILOUT_REGEX.test('The video covers TypeScript generics in depth.')
     ).toBe(false);
+  });
+
+  it('matches each bail-out trigger phrase (true matrix)', () => {
+    const positives = [
+      'transcript unavailable for this clip',
+      'transcript not available right now',
+      'transcript missing entirely',
+      'I cannot summarize without more context',
+      'there is no transcript to work from',
+      'I am unable to provide a summary',
+      'insufficient content here',
+      'insufficient information given',
+    ];
+    for (const p of positives) {
+      expect(AI_BAILOUT_REGEX.test(p)).toBe(true);
+    }
+  });
+
+  it('does NOT match near-miss / unrelated phrasings (false matrix)', () => {
+    const negatives = [
+      'the transcript was thorough and complete',
+      'I can summarize this clearly',
+      'plenty of content and information',
+      'a full transcript is attached',
+      '',
+      'summary: a great talk about databases',
+    ];
+    for (const n of negatives) {
+      expect(AI_BAILOUT_REGEX.test(n)).toBe(false);
+    }
+  });
+
+  it('is case-sensitive (uppercase phrasings do not match)', () => {
+    expect(AI_BAILOUT_REGEX.test('CANNOT SUMMARIZE')).toBe(false);
+    expect(AI_BAILOUT_REGEX.test('cannot summarize')).toBe(true);
   });
 });
