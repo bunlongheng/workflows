@@ -93,13 +93,17 @@ async function getTranscript(videoId) {
   return null;
 }
 
-// yt-dlp is the gold standard - actively maintained, adapts to YouTube changes,
-// and (with cookies) bypasses the "Sign in to confirm you're not a bot" block
-// that datacenter IPs hit. Set YOUTUBE_COOKIES_FILE or drop data/youtube-cookies.txt.
+// yt-dlp is the gold standard - actively maintained, adapts to YouTube changes.
+// Datacenter IPs (Linode VPS) hit "Sign in to confirm you're not a bot", so route
+// through a residential exit when available:
+//   - YTDLP_PROXY (e.g. socks5://127.0.0.1:1080, an SSH SOCKS tunnel into the M4
+//     over Tailscale) makes YouTube see the home IP - free + unlimited + reliable.
+//   - YOUTUBE_COOKIES_FILE (browser cookies) is an alternative bypass.
 function fetchViaYtDlp(videoId) {
   return new Promise((resolve, reject) => {
     const tmpBase = `/tmp/yt-${videoId}-${Date.now()}`;
     const cookiesFile = process.env.YOUTUBE_COOKIES_FILE || './data/youtube-cookies.txt';
+    const proxy = process.env.YTDLP_PROXY;
     const args = [
       '--skip-download', '--no-warnings', '--quiet',
       '--write-subs', '--write-auto-subs',
@@ -107,6 +111,7 @@ function fetchViaYtDlp(videoId) {
       '-o', `${tmpBase}.%(ext)s`,
       `https://www.youtube.com/watch?v=${videoId}`,
     ];
+    if (proxy) args.unshift('--proxy', proxy);
     if (fs.existsSync(cookiesFile)) args.unshift('--cookies', cookiesFile);
 
     const child = spawn('yt-dlp', args, { timeout: 60000 });
