@@ -1,10 +1,11 @@
 import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
+import { spawn } from 'child_process';
 import fs from 'fs';
 import { pool } from './db.js';
 import { markProcessed } from './watcher.js';
-import { AI_BAILOUT_REGEX, escapeHtml, parseTimedTextXml } from './pipeline-helpers.js';
+import { AI_BAILOUT_REGEX, escapeHtml, parseJson3, parseTimedTextXml } from './pipeline-helpers.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: resolve(__dirname, '.env') });
@@ -65,62 +66,107 @@ export async function processVideo(videoId) {
   return { videoId, title: meta.title, ...result };
 }
 
+// Ordered transcript fetch chain. YouTube fully bot-blocks datacenter IPs
+// (Linode VPS), so the most reliable path is yt-dlp with a logged-in cookies
+// file. We try, in order: yt-dlp (cookies) -> multi-client innertube -> public API.
 async function getTranscript(videoId) {
-  // Method 1: Innertube player API (no auth needed, Android client bypasses blocks)
-  try {
-    const transcript = await fetchViaAndroidClient(videoId);
-    if (transcript) return transcript;
-  } catch (err) {
-    console.log(`[transcript] Android client failed: ${err.message}`);
+  const methods = [
+    ['yt-dlp', fetchViaYtDlp],
+    ['innertube', fetchViaInnertube],
+    ['public-api', fetchViaPublicAPI],
+    // Paid fallback (transcriptapi.com): only reached when the free methods
+    // fail (e.g. datacenter-IP bot block), and only charges a credit on success.
+    ['transcriptapi', fetchViaTranscriptApi],
+  ];
+  for (const [name, fn] of methods) {
+    try {
+      const t = await fn(videoId);
+      if (t && t.length > 0) {
+        console.log(`[transcript] got ${t.length} chars via ${name}`);
+        return t;
+      }
+      console.log(`[transcript] ${name} returned nothing`);
+    } catch (err) {
+      console.log(`[transcript] ${name} failed: ${err.message}`);
+    }
   }
-
-  // Method 2: youtubetranscript.com public API
-  try {
-    const transcript = await fetchViaPublicAPI(videoId);
-    if (transcript) return transcript;
-  } catch (err) {
-    console.log(`[transcript] Public API failed: ${err.message}`);
-  }
-
   return null;
 }
 
-async function fetchViaAndroidClient(videoId) {
-  // TV embedded player - works reliably for captions
-  const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      videoId,
-      context: {
-        client: {
-          clientName: 'TV_EMBEDDED_PLAYER',
-          clientVersion: '2.0',
-          hl: 'en',
-        },
-        thirdParty: { embedUrl: 'https://www.youtube.com' },
-      },
-    }),
+// yt-dlp is the gold standard - actively maintained, adapts to YouTube changes,
+// and (with cookies) bypasses the "Sign in to confirm you're not a bot" block
+// that datacenter IPs hit. Set YOUTUBE_COOKIES_FILE or drop data/youtube-cookies.txt.
+function fetchViaYtDlp(videoId) {
+  return new Promise((resolve, reject) => {
+    const tmpBase = `/tmp/yt-${videoId}-${Date.now()}`;
+    const cookiesFile = process.env.YOUTUBE_COOKIES_FILE || './data/youtube-cookies.txt';
+    const args = [
+      '--skip-download', '--no-warnings', '--quiet',
+      '--write-subs', '--write-auto-subs',
+      '--sub-langs', 'en.*', '--sub-format', 'json3',
+      '-o', `${tmpBase}.%(ext)s`,
+      `https://www.youtube.com/watch?v=${videoId}`,
+    ];
+    if (fs.existsSync(cookiesFile)) args.unshift('--cookies', cookiesFile);
+
+    const child = spawn('yt-dlp', args, { timeout: 60000 });
+    let stderr = '';
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', (e) => reject(new Error(`yt-dlp spawn: ${e.message}`)));
+    child.on('close', () => {
+      try {
+        const dir = '/tmp';
+        const prefix = tmpBase.split('/').pop();
+        const subFile = fs.readdirSync(dir).find((f) => f.startsWith(prefix) && f.endsWith('.json3'));
+        if (!subFile) {
+          return reject(new Error(stderr.split('\n').filter(Boolean).pop() || 'no subtitle file produced'));
+        }
+        const full = `${dir}/${subFile}`;
+        const json3 = fs.readFileSync(full, 'utf-8');
+        fs.unlinkSync(full);
+        resolve(parseJson3(json3));
+      } catch (e) {
+        reject(e);
+      }
+    });
   });
+}
 
-  if (!res.ok) throw new Error(`Innertube: ${res.status}`);
-
-  const data = await res.json();
-  const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-
-  if (!tracks || tracks.length === 0) {
-    console.log('[transcript] No captions available for this video');
-    return null;
+// Multi-client innertube. Different clients have different bot-detection;
+// fetch the caption track as json3 (cleaner than srv3 XML).
+async function fetchViaInnertube(videoId) {
+  const clients = [
+    { clientName: 'ANDROID', clientVersion: '19.09.37', androidSdkVersion: 30, hl: 'en' },
+    { clientName: 'IOS', clientVersion: '19.09.3', hl: 'en' },
+    { clientName: 'TV_EMBEDDED_PLAYER', clientVersion: '2.0', hl: 'en', _embed: true },
+    { clientName: 'WEB', clientVersion: '2.20240101', hl: 'en' },
+  ];
+  for (const c of clients) {
+    try {
+      const { _embed, ...client } = c;
+      const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoId,
+          context: { client, ...(_embed ? { thirdParty: { embedUrl: 'https://www.youtube.com' } } : {}) },
+        }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+      if (!tracks || tracks.length === 0) continue;
+      const enTrack = tracks.find((t) => t.languageCode === 'en') || tracks[0];
+      if (!enTrack?.baseUrl) continue;
+      const capRes = await fetch(enTrack.baseUrl + '&fmt=json3');
+      if (!capRes.ok) continue;
+      const parsed = parseJson3(await capRes.text());
+      if (parsed) return parsed;
+    } catch {
+      // try next client
+    }
   }
-
-  const enTrack = tracks.find((t) => t.languageCode === 'en') || tracks[0];
-  if (!enTrack?.baseUrl) return null;
-
-  const captionRes = await fetch(enTrack.baseUrl + '&fmt=srv3');
-  if (!captionRes.ok) throw new Error(`Caption XML: ${captionRes.status}`);
-
-  const xml = await captionRes.text();
-  return parseTimedTextXml(xml);
+  return null;
 }
 
 async function fetchViaPublicAPI(videoId) {
@@ -129,6 +175,20 @@ async function fetchViaPublicAPI(videoId) {
   const xml = await res.text();
   if (!xml.includes('<text')) return null;
   return parseTimedTextXml(xml);
+}
+
+// transcriptapi.com - hosted service with residential proxies. Works from the
+// datacenter VPS where YouTube blocks direct access. 1 credit per success only.
+async function fetchViaTranscriptApi(videoId) {
+  const key = process.env.TRANSCRIPTAPI_KEY;
+  if (!key) return null; // not configured - skip silently
+  const url = `https://transcriptapi.com/api/v2/youtube/transcript?video_url=${encodeURIComponent(videoId)}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${key}` } });
+  if (!res.ok) throw new Error(`transcriptapi: ${res.status}`);
+  const data = await res.json();
+  const segs = Array.isArray(data?.transcript) ? data.transcript : [];
+  const joined = segs.map((s) => s?.text || '').join(' ').replace(/\s+/g, ' ').trim();
+  return joined || null;
 }
 
 async function getVideoMeta(videoId) {

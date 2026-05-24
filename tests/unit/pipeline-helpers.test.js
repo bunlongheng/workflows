@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AI_BAILOUT_REGEX,
   escapeHtml,
+  parseJson3,
   parseTimedTextXml,
 } from '../../server/pipeline-helpers.js';
 
@@ -155,5 +156,29 @@ describe('AI_BAILOUT_REGEX', () => {
   it('is case-sensitive (uppercase phrasings do not match)', () => {
     expect(AI_BAILOUT_REGEX.test('CANNOT SUMMARIZE')).toBe(false);
     expect(AI_BAILOUT_REGEX.test('cannot summarize')).toBe(true);
+  });
+});
+
+describe('parseJson3', () => {
+  it('joins seg utf8 across events', () => {
+    const j = { events: [{ segs: [{ utf8: 'Hello ' }, { utf8: 'world' }] }, { segs: [{ utf8: ' again' }] }] };
+    expect(parseJson3(j)).toBe('Hello world again');
+  });
+  it('parses a json3 string', () => {
+    expect(parseJson3(JSON.stringify({ events: [{ segs: [{ utf8: 'hi' }] }] }))).toBe('hi');
+  });
+  it('skips events without segs and non-string utf8', () => {
+    const j = { events: [{}, { segs: [{ utf8: 'a' }, { other: 1 }] }, null] };
+    expect(parseJson3(j)).toBe('a');
+  });
+  it('returns null for empty / malformed input', () => {
+    expect(parseJson3('')).toBeNull();
+    expect(parseJson3('not json')).toBeNull();
+    expect(parseJson3({ events: [] })).toBeNull();
+    expect(parseJson3(null)).toBeNull();
+  });
+  it('collapses whitespace in joined output', () => {
+    const j = { events: [{ segs: [{ utf8: 'a\n\n' }, { utf8: '  b' }] }] };
+    expect(parseJson3(j)).toBe('a b');
   });
 });

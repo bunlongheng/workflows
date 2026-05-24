@@ -22,6 +22,27 @@ export function parseTimedTextXml(xml) {
   return joined || null;
 }
 
+// Parse a YouTube json3 caption track (yt-dlp / timedtext &fmt=json3) into a
+// single joined string. Shape: { events: [{ segs: [{ utf8 }] }] }.
+// Returns null when there's no usable text.
+export function parseJson3(input) {
+  let data = input;
+  if (typeof input === 'string') {
+    if (!input.trim()) return null;
+    try { data = JSON.parse(input); } catch { return null; }
+  }
+  const events = data && Array.isArray(data.events) ? data.events : [];
+  const parts = [];
+  for (const ev of events) {
+    if (!ev || !Array.isArray(ev.segs)) continue;
+    for (const seg of ev.segs) {
+      if (seg && typeof seg.utf8 === 'string') parts.push(seg.utf8);
+    }
+  }
+  const joined = parts.join('').replace(/\s+/g, ' ').trim();
+  return joined || null;
+}
+
 // Escape user/AI-supplied strings before embedding into HTML.
 // Stickies renders this content as HTML, so unescaped values are an XSS vector.
 export function escapeHtml(s) {
