@@ -21,6 +21,22 @@ describe('timeAgo', () => {
     expect(timeAgo(isoMinusMs(30 * 1000))).toBe('just now');
   });
 
+  it('returns "just now" for a 0s difference (now === date)', () => {
+    expect(timeAgo(isoMinusMs(0))).toBe('just now');
+  });
+
+  it('returns "just now" at 59 seconds (still under a minute)', () => {
+    expect(timeAgo(isoMinusMs(59 * 1000))).toBe('just now');
+  });
+
+  it('flips to "1m ago" at exactly 60 seconds', () => {
+    expect(timeAgo(isoMinusMs(60 * 1000))).toBe('1m ago');
+  });
+
+  it('returns "1m ago" at 90 seconds (floors to 1 minute)', () => {
+    expect(timeAgo(isoMinusMs(90 * 1000))).toBe('1m ago');
+  });
+
   it('returns minutes ago at 5 minutes', () => {
     expect(timeAgo(isoMinusMs(5 * 60 * 1000))).toBe('5m ago');
   });
@@ -43,5 +59,18 @@ describe('timeAgo', () => {
 
   it('returns 30d ago at 30 days', () => {
     expect(timeAgo(isoMinusMs(30 * 24 * 60 * 60 * 1000))).toBe('30d ago');
+  });
+
+  it('returns 365d ago at exactly one year', () => {
+    expect(timeAgo(isoMinusMs(365 * 24 * 60 * 60 * 1000))).toBe('365d ago');
+  });
+
+  it('returns "1h ago" at 119 minutes (just under 2 hours)', () => {
+    expect(timeAgo(isoMinusMs(119 * 60 * 1000))).toBe('1h ago');
+  });
+
+  it('treats a future date as "just now" (negative diff floors below 1)', () => {
+    // date 5 minutes in the future -> diff is negative -> mins < 1 -> just now.
+    expect(timeAgo(isoMinusMs(-5 * 60 * 1000))).toBe('just now');
   });
 });

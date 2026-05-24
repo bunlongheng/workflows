@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setOAuthStateCookie, verifyAndClearOAuthState } from '../../lib/oauth-state';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -17,6 +17,10 @@ function makeRequest(opts: { cookies?: Record<string, string>; state?: string | 
 }
 
 describe('setOAuthStateCookie', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('sets an httpOnly cookie named oauth_state_<provider> and returns its value', () => {
     const res = NextResponse.next();
     const state = setOAuthStateCookie(res, 'gmail');
@@ -31,6 +35,41 @@ describe('setOAuthStateCookie', () => {
     const a = setOAuthStateCookie(res, 'gmail');
     const b = setOAuthStateCookie(res, 'gmail');
     expect(a).not.toBe(b);
+  });
+
+  it('scopes the cookie to /api/auth/<provider> and marks it httpOnly + lax', () => {
+    const res = NextResponse.next();
+    setOAuthStateCookie(res, 'google-calendar');
+    const cookie = res.cookies.get('oauth_state_google-calendar');
+    expect(cookie?.path).toBe('/api/auth/google-calendar');
+    expect(cookie?.httpOnly).toBe(true);
+    expect(cookie?.sameSite).toBe('lax');
+    expect(cookie?.maxAge).toBe(10 * 60);
+  });
+
+  it('sets secure:false outside production', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    const res = NextResponse.next();
+    setOAuthStateCookie(res, 'gmail');
+    expect(res.cookies.get('oauth_state_gmail')?.secure).toBe(false);
+  });
+
+  it('sets secure:true in production', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const res = NextResponse.next();
+    setOAuthStateCookie(res, 'gmail');
+    expect(res.cookies.get('oauth_state_gmail')?.secure).toBe(true);
+  });
+
+  it('names cookies per provider so they do not collide', () => {
+    const res = NextResponse.next();
+    setOAuthStateCookie(res, 'gmail');
+    setOAuthStateCookie(res, 'spotify');
+    expect(res.cookies.get('oauth_state_gmail')).toBeDefined();
+    expect(res.cookies.get('oauth_state_spotify')).toBeDefined();
+    expect(res.cookies.get('oauth_state_gmail')?.value).not.toBe(
+      res.cookies.get('oauth_state_spotify')?.value
+    );
   });
 });
 
@@ -70,5 +109,47 @@ describe('verifyAndClearOAuthState', () => {
     // Set-Cookie that overwrites the original.
     const cleared = res.cookies.get('oauth_state_gmail');
     expect(cleared?.value).toBe('');
+  });
+
+  it('clears the cookie with maxAge:0 even on a successful match', () => {
+    const state = 'fixed-state-value-aaa';
+    const req = makeRequest({ cookies: { oauth_state_gmail: state }, state });
+    const res = NextResponse.next();
+    expect(verifyAndClearOAuthState(req, res, 'gmail')).toBe(true);
+    const cleared = res.cookies.get('oauth_state_gmail');
+    expect(cleared?.value).toBe('');
+    expect(cleared?.maxAge).toBe(0);
+  });
+
+  it('returns false when query state is absent but cookie exists', () => {
+    const req = makeRequest({ cookies: { oauth_state_gmail: 'aaa' } });
+    const res = NextResponse.next();
+    expect(verifyAndClearOAuthState(req, res, 'gmail')).toBe(false);
+  });
+
+  it('returns false when neither cookie nor query state are present', () => {
+    const req = makeRequest({});
+    const res = NextResponse.next();
+    expect(verifyAndClearOAuthState(req, res, 'gmail')).toBe(false);
+  });
+
+  it('returns false for equal-length but different values (constant-time path)', () => {
+    const req = makeRequest({ cookies: { oauth_state_gmail: 'abcdef' }, state: 'abcdeg' });
+    const res = NextResponse.next();
+    expect(verifyAndClearOAuthState(req, res, 'gmail')).toBe(false);
+  });
+
+  it('returns false when lengths differ even if one is a prefix of the other', () => {
+    const req = makeRequest({ cookies: { oauth_state_gmail: 'abc' }, state: 'abcd' });
+    const res = NextResponse.next();
+    expect(verifyAndClearOAuthState(req, res, 'gmail')).toBe(false);
+  });
+
+  it('matches a freshly minted state round-trip (set then verify)', () => {
+    const setRes = NextResponse.next();
+    const state = setOAuthStateCookie(setRes, 'spotify');
+    const req = makeRequest({ cookies: { oauth_state_spotify: state }, state });
+    const res = NextResponse.next();
+    expect(verifyAndClearOAuthState(req, res, 'spotify')).toBe(true);
   });
 });
