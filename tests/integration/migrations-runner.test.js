@@ -44,4 +44,39 @@ describe('migrations splitter', () => {
     expect(stmts[0]).toMatch(/^DO \$\$/);
     expect(stmts[0]).toMatch(/automation_logs_automation_id_fkey/);
   });
+
+  it('003_validate_fk.sql -> 2 non-empty statements (DELETE + VALIDATE)', () => {
+    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, '003_validate_fk.sql'), 'utf-8');
+    const stmts = splitStatements(sql);
+    expect(stmts).toHaveLength(2);
+    for (const s of stmts) {
+      expect(s.length).toBeGreaterThan(0);
+      expect(s.trim()).toBe(s);
+    }
+    // First statement: orphan-cleanup DELETE.
+    expect(stmts[0]).toMatch(/^DELETE FROM automation_logs/);
+    expect(stmts[0]).toMatch(/automation_id NOT IN \(SELECT id FROM automations\)/);
+    // Second statement: DO $$...$$ block that VALIDATEs the FK constraint.
+    expect(stmts[1]).toMatch(/^DO \$\$/);
+    expect(stmts[1]).toMatch(/VALIDATE CONSTRAINT automation_logs_automation_id_fkey/);
+  });
+
+  it('strips leading SQL line comments from 003 before splitting', () => {
+    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, '003_validate_fk.sql'), 'utf-8');
+    const stmts = splitStatements(sql);
+    // The big comment header must not survive as its own statement.
+    for (const s of stmts) {
+      expect(s.startsWith('--')).toBe(false);
+    }
+  });
+
+  it('keeps the DO $$...$$ block in 003 intact (single logical statement)', () => {
+    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, '003_validate_fk.sql'), 'utf-8');
+    const stmts = splitStatements(sql);
+    const doBlock = stmts.find((s) => s.startsWith('DO $$'));
+    // The semicolons inside the DO block must NOT split it apart.
+    expect(doBlock).toContain('BEGIN');
+    expect(doBlock).toContain('EXCEPTION WHEN undefined_object THEN NULL');
+    expect(doBlock).toContain('END $$');
+  });
 });
