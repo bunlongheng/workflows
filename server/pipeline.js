@@ -290,7 +290,7 @@ Respond ONLY with valid JSON, no markdown.`,
 }
 
 const YOUTUBE_FOLDER_ID = 'e28dfc1d-e1bb-431f-bb54-b27b9f595704';
-const STICKIES_USER_ID = '47a18fff-a0c4-4f18-b0f0-40821c18793d';
+const STICKIES_USER_ID = '731ace87-64e5-44db-bf2a-82265f06f4d9';
 const DIAGRAMS_USER_ID = '731ace87-64e5-44db-bf2a-82265f06f4d9';
 
 async function deliverOutput(videoId, meta, result, transcript) {
