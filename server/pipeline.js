@@ -50,8 +50,8 @@ export async function processVideo(videoId) {
     result.error = 'AI could not extract content from transcript';
   }
 
-  // Step 4: Deliver to Stickies
-  await deliverOutput(videoId, meta, result);
+  // Step 4: Deliver to Stickies (pass transcript so the sticky includes it)
+  await deliverOutput(videoId, meta, result, transcript);
 
   // Steps 5+6: Mind map and diagram are independent - generate in parallel
   await Promise.all([
@@ -293,14 +293,16 @@ const YOUTUBE_FOLDER_ID = 'e28dfc1d-e1bb-431f-bb54-b27b9f595704';
 const STICKIES_USER_ID = '47a18fff-a0c4-4f18-b0f0-40821c18793d';
 const DIAGRAMS_USER_ID = '731ace87-64e5-44db-bf2a-82265f06f4d9';
 
-async function deliverOutput(videoId, meta, result) {
-  const content = formatAsHTML(meta, videoId, result);
+async function deliverOutput(videoId, meta, result, transcript) {
+  const content = formatAsHTML(meta, videoId, result, transcript);
 
-  // Write directly to stickies table in Postgres
+  // Write directly to stickies table in Postgres. type MUST be 'html' - the
+  // content is HTML and the Stickies app renders by type (markdown would show
+  // raw tags). The Stickies external API rejects markdown outright.
   try {
     await pool.query(
       `INSERT INTO stickies (title, content, folder_name, folder_id, folder_color, type, icon, user_id)
-       VALUES ($1, $2, 'YouTube', $3, '#FF3B30', 'markdown', '📺', $4)`,
+       VALUES ($1, $2, 'YouTube', $3, '#FF3B30', 'html', '📺', $4)`,
       [`YT: ${meta.title.slice(0, 50)}`, content, YOUTUBE_FOLDER_ID, STICKIES_USER_ID]
     );
     console.log(`[output] Saved to Stickies DB: ${meta.title}`);
@@ -313,7 +315,7 @@ async function deliverOutput(videoId, meta, result) {
   fs.writeFileSync(`./data/outputs/${videoId}.html`, content);
 }
 
-function formatAsHTML(meta, videoId, result) {
+function formatAsHTML(meta, videoId, result, transcript) {
   const { title, channel, description } = meta;
   const thumbnail = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
   const url = `https://youtube.com/watch?v=${videoId}`;
@@ -343,6 +345,14 @@ function formatAsHTML(meta, videoId, result) {
 <p style="margin:0;line-height:1.6;color:#999;font-size:13px;white-space:pre-wrap;">${escapeHtml(description.slice(0, 2000))}</p>`
     : '';
 
+  // Full transcript, collapsed by default so the sticky stays skimmable.
+  const transcriptHTML = transcript
+    ? `<details style="margin:20px 0 0;">
+<summary style="cursor:pointer;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Full Transcript (${transcript.length.toLocaleString()} chars)</summary>
+<p style="margin:8px 0 0;line-height:1.7;color:#bbb;font-size:13px;white-space:pre-wrap;">${escapeHtml(transcript)}</p>
+</details>`
+    : '';
+
   return `<div style="font-family:-apple-system,system-ui,sans-serif;color:#e0e0e0;max-width:100%;overflow-wrap:break-word;">
 <a href="${url}" target="_blank" style="text-decoration:none;">
   <img src="${thumbnail}" alt="${safeTitle}" style="width:100%;border-radius:8px;margin-bottom:12px;" />
@@ -362,6 +372,7 @@ ${ideasHTML ? `<h3 style="margin:20px 0 8px;font-size:14px;color:#888;text-trans
 
 ${descHTML}
 ${linksHTML}
+${transcriptHTML}
 </div>`;
 }
 
