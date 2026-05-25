@@ -179,7 +179,12 @@ async function fetchViaPublicAPI(videoId) {
   if (!res.ok) throw new Error(`Public API: ${res.status}`);
   const xml = await res.text();
   if (!xml.includes('<text')) return null;
-  return parseTimedTextXml(xml);
+  const parsed = parseTimedTextXml(xml);
+  // This endpoint frequently returns a truncated/error stub (~100-150 chars).
+  // Reject anything implausibly short so junk never gets summarized as a real
+  // transcript - better to report "no transcript" truthfully.
+  if (!parsed || parsed.length < 200) return null;
+  return parsed;
 }
 
 // transcriptapi.com - hosted service with residential proxies. Works from the
