@@ -171,12 +171,12 @@ export default function ClientLayout() {
         </div>
       </header>
 
-      {/* Main: grids on top, canvas below */}
-      <div className="flex flex-col flex-1 overflow-hidden" style={{ height: 'calc(100vh - 52px)' }}>
-        {/* Integration grid strip */}
+      {/* Main: integrations panel on left, canvas on right */}
+      <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 52px)' }}>
+        {/* Integration grid panel */}
         <div
-          className="flex-shrink-0 overflow-x-auto"
-          style={{ background: '#111', borderBottom: '1px solid #222', scrollbarWidth: 'none' }}
+          className="flex-shrink-0 h-full"
+          style={{ background: '#111', borderRight: '1px solid #222' }}
         >
           <Sidebar onOpenConnections={(id) => { setFocusedIntegration(id || null); setShowConnections(true); }} />
         </div>
