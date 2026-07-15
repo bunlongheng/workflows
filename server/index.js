@@ -48,6 +48,10 @@ app.use((req, res, next) => {
   // /health stays open for uptime checks
   if (req.path === '/health') return next();
 
+  // Inbound webhooks are called by external services that can't send the
+  // global bearer token; they authenticate via their own per-automation secret.
+  if (req.path.startsWith('/api/hooks/')) return next();
+
   // SSE EventSource cannot send custom headers; allow token via query param fallback.
   if (req.path === '/api/events' && req.query.token === VPS_AUTH_TOKEN) return next();
 
@@ -58,10 +62,13 @@ app.use((req, res, next) => {
   }
   next();
 });
-const CHECK_INTERVAL = process.env.CHECK_INTERVAL_SEC
-  ? parseInt(process.env.CHECK_INTERVAL_SEC) * 1000
-  : (parseInt(process.env.CHECK_INTERVAL_MIN) || 5) * 60 * 1000;
 const TOKEN_FILE = './data/youtube-token.json';
+
+// On-demand sync: assigned by startWatcher(), called by POST /api/sync.
+// lastSyncAt throttles rapid re-opens / duplicate tabs so a burst of app loads
+// cannot fan out into a burst of YouTube calls.
+let runSyncNow = async () => ({ likes: 0 });
+let lastSyncAt = 0;
 
 // Load saved token on startup
 try {
@@ -136,6 +143,50 @@ app.post('/api/gmail/disconnect', (req, res) => {
   console.log('[gmail] Disconnected');
   res.json({ success: true });
 });
+
+// --- Philips Hue (local bridge over Tailscale) ---
+// The Hue bridge lives on the home LAN. The always-on local machine controls
+// it directly over http; the VPS reaches that machine over Tailscale and
+// forwards the desired light state. No Philips cloud / OAuth.
+const HUE_LOCAL_URL = process.env.HUE_LOCAL_URL || 'http://100.99.41.27:3008';
+
+// Map a saved action type to a light mode. An explicit config.mode wins so the
+// UI can pick flashing / fade / solid / colorloop independently of action type.
+function hueModeFor(actionType, config) {
+  if (config.mode) return String(config.mode);
+  if (actionType === 'set_color') return 'solid';
+  if (actionType === 'toggle_lights') return (config.on === false || config.on === 'false') ? 'off' : 'solid';
+  if (actionType === 'set_scene') return 'colorloop';
+  return 'flashing';
+}
+
+// Forward a Hue action to the local machine, which drives the LAN bridge.
+async function runHueAction(actionType, config) {
+  const body = {
+    mode: hueModeFor(actionType, config),
+    color: config.color || 'red',
+    group: config.group_id || config.group,
+    brightness: config.brightness,
+    flash_count: config.flash_count || config.flashes || config.times,
+    fade_seconds: config.fade_seconds,
+    on: config.on,
+  };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const r = await fetch(`${HUE_LOCAL_URL}/api/hue/control`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `local hue control failed (${r.status})`);
+    return { executed: true, actionType, ...data };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // Gmail search - check for new emails matching a query
 app.get('/api/gmail/search', async (req, res) => {
@@ -333,11 +384,12 @@ app.post('/api/gmail/sticky-from-message', async (req, res) => {
     // Same shape pipeline.js uses for stickies insert
     const STICKIES_USER_ID = '47a18fff-a0c4-4f18-b0f0-40821c18793d';
     const stickyRes = await pool.query(
-      `INSERT INTO stickies (title, content, folder_name, folder_color, type, icon, user_id)
-       VALUES ($1, $2, $3, '#3b82f6', 'markdown', '📧', $4) RETURNING id`,
+      `INSERT INTO stickies (title, content, folder_name, folder_color, type, icon, user_id, created_by_key)
+       VALUES ($1, $2, $3, '#3b82f6', 'markdown', '📧', $4, 'automations-gmail') RETURNING id`,
       [subject.slice(0, 200), cleanText, folder, STICKIES_USER_ID]
     );
     const stickyId = stickyRes.rows[0]?.id;
+    pool.query(`UPDATE api_keys SET last_used_at = now() WHERE label = 'automations-gmail' AND revoked_at IS NULL`).catch(() => {});
 
     await pool.query(
       `INSERT INTO automation_logs (automation_id, automation_name, trigger_payload, result, detail, via)
@@ -498,6 +550,37 @@ app.delete('/api/automations/:id', async (req, res) => {
   }
 });
 
+// Clear all execution logs for an automation (optionally only failed ones with ?result=failed)
+app.delete('/api/automations/:id/logs', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (req.query.result === 'failed') {
+      await pool.query(
+        `DELETE FROM automation_logs WHERE automation_id = $1 AND result NOT IN ('success','ok')`,
+        [id]
+      );
+    } else {
+      await pool.query('DELETE FROM automation_logs WHERE automation_id = $1', [id]);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[automations] Clear logs error:', err.message);
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// Delete a single execution log (scoped to its automation for safety)
+app.delete('/api/automations/:id/logs/:logId', async (req, res) => {
+  try {
+    const { id, logId } = req.params;
+    await pool.query('DELETE FROM automation_logs WHERE id = $1 AND automation_id = $2', [logId, id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[automations] Delete log error:', err.message);
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
 // Update automation (toggle active, edit name/condition/action_config)
 app.patch('/api/automations/:id', async (req, res) => {
   try {
@@ -568,6 +651,71 @@ app.post('/api/automations', async (req, res) => {
   } catch (err) {
     console.error('[automations] Create error:', err.message);
     res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// Natural-language -> automation. Claude turns a sentence into a structured
+// automation, which we validate and create (reusing the same dedup/insert path).
+const AUTOMATION_CATALOG = `
+TRIGGERS (trigger_integration_type -> trigger_type, with the EXACT condition keys to use):
+- gmail -> subject_match (condition: {"subject": "..."}) | from_match (condition: {"from": "..."}) | body_match (condition: {"body": "..."}) | search_query_match (condition: {"query": "..."}) | new_email_received (condition: {})
+- webhook -> webhook_received (condition: {"secret": "..."} optional)
+- youtube -> new_video_uploaded | video_liked
+- hue -> motion_detected | button_pressed
+Use ONLY those exact condition key names (e.g. "subject", never "subject_contains").
+ACTIONS (action_integration_type -> action_type):
+- stickies -> create_sticky        (config: folder)
+- claude -> summarize | analyze | generate | classify   (config: prompt, model, output_folder)
+- webhook -> send_webhook | post_request   (config: url, method, headers, body, ai_prompt)
+- hue -> set_color | flash_lights | toggle_lights | set_scene   (config: group, color, brightness)
+- gmail -> send_email   (config: to, subject, body)
+`;
+
+app.post('/api/automations/parse', async (req, res) => {
+  const { text } = req.body || {};
+  if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
+  try {
+    const instruction = `You convert a plain-English request into ONE automation for a no-code builder.
+Use ONLY these integration/trigger/action types:
+${AUTOMATION_CATALOG}
+Respond with ONLY valid JSON (no markdown) shaped exactly:
+{"name": string, "trigger_integration_type": string, "trigger_type": string, "action_integration_type": string, "action_type": string, "action_config": object, "condition": object}
+Pick the closest matching types. Put trigger filters (keywords, sender, query, secret) in "condition" and action settings in "action_config". Keep "name" short (max 6 words).`;
+    const raw = await callClaude({ instruction, input: text.trim() });
+    let parsed;
+    try {
+      parsed = JSON.parse(raw.replace(/^```json\s*|^```\s*|```$/gm, '').trim());
+    } catch {
+      return res.status(422).json({ error: 'Could not understand that. Try rephrasing.', raw: raw.slice(0, 300) });
+    }
+    const { name, trigger_type, trigger_integration_type, action_type, action_integration_type, action_config, condition } = parsed;
+    if (!name || !trigger_type || !action_type) {
+      return res.status(422).json({ error: 'Incomplete automation generated', parsed });
+    }
+    // Claude tends to invent stale model ids; drop it so the server default applies.
+    if (action_config && typeof action_config === 'object') delete action_config.model;
+
+    // Dedup (same rule as POST /api/automations)
+    if (trigger_integration_type && action_integration_type) {
+      const dupe = await pool.query(
+        `SELECT id, name FROM automations WHERE trigger_integration_type = $1 AND action_integration_type = $2 AND trigger_type = $3 AND action_type = $4 LIMIT 1`,
+        [trigger_integration_type, action_integration_type, trigger_type, action_type]
+      );
+      if (dupe.rows.length > 0) {
+        return res.status(409).json({ error: `Duplicate: "${dupe.rows[0].name}" already exists`, parsed });
+      }
+    }
+
+    const result = await pool.query(
+      `INSERT INTO automations (name, trigger_type, trigger_integration_type, action_type, action_integration_type, action_config, condition)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [name, trigger_type, trigger_integration_type || null, action_type, action_integration_type || null, action_config || {}, condition || {}]
+    );
+    console.log(`[nl] Created "${name}" from: ${text.slice(0, 80)}`);
+    res.json({ automation: result.rows[0] });
+  } catch (err) {
+    console.error('[nl] parse error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -758,9 +906,26 @@ function broadcast(event, data) {
   }
 }
 
+// On-demand sync - the app calls this when opened or via the "Sync now" button.
+// Replaces the old background poll: nothing hits YouTube/Gmail unless you ask.
+app.post('/api/sync', async (req, res) => {
+  const now = Date.now();
+  if (now - lastSyncAt < 15000) {
+    return res.json({ throttled: true, likes: 0 });
+  }
+  lastSyncAt = now;
+  try {
+    const result = await runSyncNow();
+    res.json({ synced: true, ...result });
+  } catch (err) {
+    console.error('[sync] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Watcher loop
 function startWatcher() {
-  console.log(`[watcher] Starting - checking every ${CHECK_INTERVAL / 1000}s`);
+  console.log('[watcher] Ready - on-demand sync only (no background polling)');
 
   // Concurrency guard: a slow tick must not stack on top of itself.
   let ytRunning = false;
@@ -770,8 +935,10 @@ function startWatcher() {
       return;
     }
     ytRunning = true;
+    let count = 0;
     try {
       const newLikes = await checkForNewLikes();
+      count = newLikes.length;
       for (const video of newLikes) {
         console.log(`[watcher] New like detected: ${video.title} (${video.videoId})`);
         broadcast('processing', { videoId: video.videoId, title: video.title, status: 'started' });
@@ -793,7 +960,7 @@ function startWatcher() {
               await pool.query(
                 `INSERT INTO automation_logs (automation_id, automation_name, trigger_payload, result, detail, via)
                  VALUES ($1, $2, $3, $4, $5, $6)`,
-                [row.id, row.name, JSON.stringify({ videoId: video.videoId, title: video.title, mindmapId: result._mindmapId || null, diagramId: result._diagramId || null }), logResult, detail.slice(0, 500), 'watcher']
+                [row.id, row.name, JSON.stringify({ videoId: video.videoId, title: video.title, stickyId: result._stickyId || null, mindmapId: result._mindmapId || null, diagramId: result._diagramId || null }), logResult, detail.slice(0, 500), 'watcher']
               );
             }
             broadcast('logged', { videoId: video.videoId, automations: match.rows.length });
@@ -809,6 +976,7 @@ function startWatcher() {
     } finally {
       ytRunning = false;
     }
+    return count;
   }
 
   // Guarded wrapper around the Gmail watcher tick so overlapping intervals
@@ -827,10 +995,13 @@ function startWatcher() {
     }
   }
 
-  setInterval(runCheck, CHECK_INTERVAL);
-  setInterval(runGmailGuarded, CHECK_INTERVAL);
-  runCheck(); // Run immediately on start
-  runGmailGuarded(); // Run immediately on start
+  // On-demand only: no background polling. YouTube has no "like" webhook, so the
+  // app triggers a sync when opened or via the "Sync now" button (POST /api/sync).
+  // Idle quota usage is zero - nothing runs while the app is closed.
+  runSyncNow = async () => {
+    const [likes] = await Promise.all([runCheck(), runGmailGuarded()]);
+    return { likes: likes || 0 };
+  };
 }
 
 // Gmail watcher - polls for active Gmail automations.
@@ -917,15 +1088,19 @@ async function runGmailCheck() {
     for (const auto of autos.rows) {
       try {
         const cond = auto.condition || {};
+        // Accept both the canonical key and the natural-language `_contains` variant.
+        const subjectVal = cond.subject || cond.subject_contains;
+        const fromVal = cond.from || cond.from_contains;
+        const bodyVal = cond.body || cond.body_contains;
         let query = '';
         if (auto.trigger_type === 'search_query_match') {
           const raw = cond.query || '';
-          // Wrap in quotes for exact phrase match if not already quoted
           query = raw.startsWith('"') ? raw : `"${raw}"`;
         }
-        else if (auto.trigger_type === 'subject_match') query = `subject:"${cond.subject || ''}"`;
-        else if (auto.trigger_type === 'from_match') query = `from:${cond.from || ''}`;
-        else if (auto.trigger_type === 'body_match') query = `"${cond.body || ''}"`;
+        // Skip when a filter value is missing - otherwise `subject:""` matches every recent email.
+        else if (auto.trigger_type === 'subject_match') { if (!subjectVal) continue; query = `subject:"${subjectVal}"`; }
+        else if (auto.trigger_type === 'from_match') { if (!fromVal) continue; query = `from:${fromVal}`; }
+        else if (auto.trigger_type === 'body_match') { if (!bodyVal) continue; query = `"${bodyVal}"`; }
         else if (auto.trigger_type === 'new_email_received') query = cond.query || 'is:unread';
         if (!query) continue;
 
@@ -955,6 +1130,12 @@ async function runGmailCheck() {
           const headers = detail.payload?.headers || [];
           const subject = headers.find(h => h.name === 'Subject')?.value || '';
           const from = headers.find(h => h.name === 'From')?.value || '';
+
+          // Gmail's subject:/from: search is word/stem-based (and thread-wide),
+          // not a literal substring match, so re-verify the configured filter
+          // against the real header locally before acting.
+          if (auto.trigger_type === 'subject_match' && subjectVal && !subject.toLowerCase().includes(String(subjectVal).toLowerCase())) continue;
+          if (auto.trigger_type === 'from_match' && fromVal && !from.toLowerCase().includes(String(fromVal).toLowerCase())) continue;
 
           console.log(`[gmail-watcher] Match for "${auto.name}": ${subject} from ${maskEmail(from)}`);
           broadcast('gmail_match', { automationId: auto.id, subject, from, messageId: msg.id });
@@ -1001,19 +1182,75 @@ async function runGmailCheck() {
   }
 }
 
+// Inbound webhook receiver - external services POST here to fire an automation.
+// Public (bypasses global bearer); optional per-automation secret in condition.secret.
+app.all('/api/hooks/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const found = await pool.query(
+      `SELECT id, name, active, trigger_type, condition, action_type, action_config
+       FROM automations WHERE id = $1 AND trigger_type = 'webhook_received' LIMIT 1`,
+      [id]
+    );
+    if (found.rows.length === 0) return res.status(404).json({ error: 'webhook not found' });
+    const auto = found.rows[0];
+    if (!auto.active) return res.status(403).json({ error: 'automation is paused' });
+
+    const secret = auto.condition?.secret;
+    if (secret) {
+      const provided = req.headers['x-webhook-secret'] || req.query.secret;
+      if (provided !== secret) return res.status(401).json({ error: 'invalid secret' });
+    }
+
+    const payload = (req.body && Object.keys(req.body).length) ? req.body : { ...req.query };
+    console.log(`[webhook-in] Fired "${auto.name}" (${id})`);
+    broadcast('webhook_received', { automationId: auto.id, payload });
+
+    const isManual = auto.action_config?.manual === true || auto.action_config?.manual === 'true';
+    if (isManual) {
+      await pool.query(
+        `INSERT INTO automation_logs (automation_id, automation_name, trigger_payload, result, detail, via)
+         VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
+        [auto.id, auto.name, JSON.stringify(payload), 'pending', 'Waiting for manual run', 'webhook-in']
+      );
+      broadcast('logged', { automationId: auto.id, type: 'webhook', pending: true });
+      return res.json({ ok: true, queued: true });
+    }
+
+    let result = 'success';
+    let detail_text = `Webhook payload received`;
+    try {
+      await executeAction(auto.action_type, auto.action_config, payload);
+    } catch (actionErr) {
+      result = 'error';
+      detail_text = actionErr.message;
+    }
+    await pool.query(
+      `INSERT INTO automation_logs (automation_id, automation_name, trigger_payload, result, detail, via)
+       VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
+      [auto.id, auto.name, JSON.stringify(payload), result, detail_text.slice(0, 500), 'webhook-in']
+    );
+    broadcast('logged', { automationId: auto.id, type: 'webhook' });
+    res.json({ ok: result === 'success', result });
+  } catch (err) {
+    console.error('[webhook-in] Error:', err.message);
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
 async function executeAction(actionType, config, triggerData) {
   console.log(`[action] Executing ${actionType}`, config);
 
   if (actionType === 'set_color' || actionType === 'flash_lights' || actionType === 'toggle_lights' || actionType === 'set_scene') {
-    // Hue action - call local Hue bridge if available.
-    // DB rows persist the bridge group UUID under `group_id`; older drafts /
-    // canvas previews use `group`. Prefer the UUID, fall back to legacy, then 'Office'.
-    // TODO(hue-oauth): wire up OAuth init/callback at app/api/auth/hue/route.ts +
-    // app/api/auth/hue/callback/route.ts (out of scope for this agent).
-    const group = config.group_id || config.group || 'Office';
     broadcast('hue_action', { actionType, config, trigger: triggerData });
-    console.log(`[hue] ${actionType} - group: ${group}, config:`, config);
-    return { executed: true, actionType, group };
+    try {
+      const result = await runHueAction(actionType, config);
+      console.log(`[hue] ${actionType} done:`, result);
+      return result;
+    } catch (err) {
+      console.error(`[hue] ${actionType} failed:`, err.message);
+      throw err;
+    }
   }
 
   if (actionType === 'create_sticky') {
@@ -1033,8 +1270,117 @@ async function executeAction(actionType, config, triggerData) {
     }
   }
 
+  if (actionType === 'summarize' || actionType === 'analyze' || actionType === 'generate' || actionType === 'classify') {
+    const instruction = config.prompt || CLAUDE_INSTRUCTIONS[actionType];
+    const input = payloadToText(triggerData);
+    const output = await callClaude({ instruction, input, model: config.model, apiKey: config.api_key });
+
+    const folder = config.output_folder || config.folder || 'APPs/AUTOMATIONS';
+    const title = (triggerData?.subject || `Claude ${actionType}`).slice(0, 200);
+    const STICKIES_USER_ID = '47a18fff-a0c4-4f18-b0f0-40821c18793d';
+    const stickyRes = await pool.query(
+      `INSERT INTO stickies (title, content, folder_name, folder_color, type, icon, user_id, created_by_key)
+       VALUES ($1, $2, $3, '#8b5cf6', 'markdown', '🤖', $4, 'automations-claude') RETURNING id`,
+      [title, output, folder, STICKIES_USER_ID]
+    );
+    console.log(`[claude] ${actionType} -> sticky ${stickyRes.rows[0]?.id}`);
+    return { executed: true, actionType, stickyId: stickyRes.rows[0]?.id, output: output.slice(0, 500) };
+  }
+
+  if (actionType === 'send_webhook' || actionType === 'post_request') {
+    const url = fillTemplate(config.url || '', triggerData);
+    if (!url) throw new Error('Webhook URL is required');
+    const method = (config.method || 'POST').toUpperCase();
+
+    let headers = { 'Content-Type': 'application/json' };
+    if (config.headers) {
+      try {
+        const extra = typeof config.headers === 'string' ? JSON.parse(config.headers) : config.headers;
+        headers = { ...headers, ...extra };
+      } catch {
+        console.warn('[webhook] Ignoring invalid headers JSON');
+      }
+    }
+
+    let body;
+    if (method !== 'GET' && method !== 'HEAD') {
+      if (config.ai_prompt) {
+        // AI-enhance: run the payload through Claude, send the result as the body.
+        const ai = await callClaude({ instruction: config.ai_prompt, input: payloadToText(triggerData), model: config.model, apiKey: config.api_key });
+        body = config.body ? fillTemplate(config.body, { ...triggerData, ai }) : JSON.stringify({ text: ai });
+      } else {
+        body = config.body ? fillTemplate(config.body, triggerData) : JSON.stringify(triggerData || {});
+      }
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const resp = await fetch(url, { method, headers, body, signal: controller.signal });
+      const text = await resp.text().catch(() => '');
+      console.log(`[webhook] ${method} ${url} -> ${resp.status}`);
+      if (!resp.ok) throw new Error(`Webhook responded ${resp.status}: ${text.slice(0, 200)}`);
+      return { executed: true, status: resp.status, response: text.slice(0, 500) };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   console.log(`[action] Unknown action type: ${actionType}`);
   return { executed: false, reason: 'unknown_action' };
+}
+
+// Flatten a trigger payload into plain text for an AI prompt.
+function payloadToText(data) {
+  if (data == null) return '';
+  if (typeof data === 'string') return data;
+  const parts = [];
+  if (data.subject) parts.push(`Subject: ${data.subject}`);
+  if (data.from) parts.push(`From: ${data.from}`);
+  if (data.snippet) parts.push(`Body: ${data.snippet}`);
+  if (parts.length) return parts.join('\n');
+  try { return JSON.stringify(data, null, 2); } catch { return String(data); }
+}
+
+// Call the Claude API with an instruction + input. Returns the text response.
+async function callClaude({ instruction, input, model, apiKey }) {
+  const key = apiKey || process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error('No Anthropic API key configured');
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: model || 'claude-sonnet-4-6',
+      max_tokens: 1500,
+      messages: [{ role: 'user', content: `${instruction}\n\n---\n${input}` }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Claude API error: ${res.status} - ${err.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  return (data.content?.[0]?.text || '').trim();
+}
+
+const CLAUDE_INSTRUCTIONS = {
+  summarize: 'Summarize the following content in 3-5 concise sentences.',
+  analyze: 'Analyze the following content and extract the key insights as short bullet points.',
+  generate: 'Using the following content as context, generate the requested output.',
+  classify: 'Classify or categorize the following content. Respond with the category and a one-line reason.',
+};
+
+// Replace {{key}} tokens in a string with values from the trigger payload.
+function fillTemplate(str, data) {
+  if (!str || typeof str !== 'string') return str;
+  return str.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key) => {
+    const val = key.split('.').reduce((o, k) => (o == null ? o : o[k]), data);
+    return val == null ? '' : String(val);
+  });
 }
 
 function getHistory() {

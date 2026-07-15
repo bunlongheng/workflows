@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { integrations } from '@/data/integrations';
@@ -34,7 +34,7 @@ const _twToHex: Record<string, string> = {
   'bg-blue-500': '#3b82f6', 'bg-purple-600': '#9333ea', 'bg-gray-800': '#1f2937',
   'bg-gray-700': '#374151', 'bg-indigo-500': '#6366f1', 'bg-orange-500': '#f97316',
   'bg-cyan-600': '#0891b2', 'bg-emerald-600': '#059669', 'bg-gray-500': '#6b7280',
-  'bg-amber-600': '#d97706',
+  'bg-amber-600': '#d97706', 'bg-white': '#ffffff',
 };
 const _colorHex = Object.fromEntries(integrations.map(i => [i.id, _twToHex[i.color] || '#666']));
 _colorHex['stickies_api'] = _colorHex['stickies'] || '#eab308';
@@ -74,6 +74,26 @@ function prettyAction(actionType: string): string {
 }
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const NAMED_COLORS: Record<string, string> = {
+  red: '#ef4444', green: '#22c55e', blue: '#3b82f6', yellow: '#facc15',
+  orange: '#f97316', purple: '#a855f7', pink: '#ec4899', white: '#ffffff',
+};
+function colorHexOf(v: string): string | null {
+  if (HEX_RE.test(v)) return v;
+  return NAMED_COLORS[v.toLowerCase()] || null;
+}
+
+// Human-friendly mode suffix for a Hue action (e.g. "flash (2)", "fade (3s)").
+// Solid / set-color returns '' so the row stays just "color" + swatch.
+function hueSummary(actionType: string, cfg: Record<string, string>): string {
+  const mode = String(cfg.mode || (actionType === 'flash_lights' || actionType === 'hue_flash' ? 'flashing' : 'solid')).toLowerCase();
+  if (mode === 'flashing') return `flash (${cfg.flashes || cfg.flash_count || cfg.times || '3'})`;
+  if (mode === 'fade') return `fade (${cfg.fade_seconds || '3'}s)`;
+  if (mode === 'colorloop') return 'color loop';
+  if (mode === 'breathe') return 'breathe';
+  if (mode === 'off') return 'off';
+  return '';
+}
 const HIDDEN_KEYS = new Set(['model', 'group_id', 'group', 'folder', 'output', 'api_key', 'bot_token', 'chat_id']);
 
 
@@ -95,8 +115,35 @@ const ANIMATIONS = [
   { animate: { rotate: [0, -3, 3, -3, 0], y: [0, -2, 0] }, transition: { duration: 3, repeat: Infinity, ease: 'easeInOut' as const } },
 ];
 
-function BotMascot({ size = 28 }: { size?: number }) {
+function BotMascot({ size = 28, broken = false, onClick }: { size?: number; broken?: boolean; onClick?: () => void }) {
   const [anim] = useState(() => ANIMATIONS[Math.floor(Math.random() * ANIMATIONS.length)]);
+  if (broken) {
+    return (
+      <motion.button
+        type="button"
+        onClick={onClick}
+        title="Disconnected - tap to reconnect"
+        aria-label="Disconnected - tap to reconnect"
+        className="relative inline-flex items-center justify-center flex-shrink-0 cursor-pointer"
+        style={{ background: 'transparent', border: 'none', padding: 0 }}
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1, rotate: [-9, -5, -9] }}
+        transition={{ rotate: { duration: 0.7, repeat: Infinity, ease: 'easeInOut' }, scale: { type: 'spring', stiffness: 400, damping: 12, delay: 0.2 }, opacity: { duration: 0.3, delay: 0.2 } }}
+        whileHover={{ scale: 1.15, rotate: 0 }}
+        whileTap={{ scale: 0.9 }}
+      >
+        <img src="/bot.svg" alt="" width={size} height={size} style={{ opacity: 0.5, filter: 'grayscale(1) brightness(0.75)' }} />
+        <span
+          className="absolute flex items-center justify-center rounded-full"
+          style={{ top: -size * 0.14, right: -size * 0.14, width: size * 0.52, height: size * 0.52, background: '#dc2626', boxShadow: '0 0 10px #dc2626cc' }}
+        >
+          <svg width={size * 0.34} height={size * 0.34} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </span>
+      </motion.button>
+    );
+  }
   return (
     <motion.div
       className="inline-flex items-center justify-center flex-shrink-0"
@@ -113,6 +160,9 @@ export default function AutomationsPage() {
   const router = useRouter();
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [ytBroken, setYtBroken] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
 
   useEffect(() => {
     fetch('/api/automations/list')
@@ -121,32 +171,88 @@ export default function AutomationsPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  // On-demand sync: there is no background poll, so opening the app is what
+  // detects new likes/emails and fires their actions. Also runnable manually.
+  const runSync = useCallback(async (manual = false) => {
+    setSyncing(true);
+    try {
+      const r = await fetch('/api/sync', { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && !d.throttled) {
+        const n = d.likes || 0;
+        if (manual) setSyncMsg(n > 0 ? `Synced - ${n} new` : 'Up to date');
+        fetch('/api/automations/list')
+          .then((x) => x.json())
+          .then((data) => setAutomations(data.automations || []))
+          .catch(() => {});
+      } else if (manual) {
+        setSyncMsg(d.throttled ? 'Just synced' : 'Sync failed');
+      }
+    } catch {
+      if (manual) setSyncMsg('Sync failed');
+    }
+    setSyncing(false);
+    if (manual) setTimeout(() => setSyncMsg(''), 2500);
+  }, []);
+
+  useEffect(() => { runSync(false); }, [runSync]);
+
+  // Probe the live feed - 401 means the YouTube token is dead (status "connected" lies)
+  useEffect(() => {
+    fetch('/api/youtube/likes?maxResults=1')
+      .then((r) => setYtBroken(r.status === 401))
+      .catch(() => setYtBroken(true));
+  }, []);
+
+  const reconnect = () => { window.location.href = '/api/auth/youtube'; };
+
   const filtered = automations;
 
   return (
     <div className="min-h-screen select-none" style={{ background: '#0a0a0a', overflowX: 'hidden' }}>
       {/* Header */}
-      <header className="px-5 sm:px-8 pt-6 pb-2">
+      <header className="px-5 sm:px-8 pt-6 pb-2 max-w-3xl mx-auto w-full">
         <div className="flex items-center justify-between mt-3 mb-4">
           <div className="flex items-center gap-2">
-            <h1 className="text-[20px] font-bold tracking-tight" style={{ fontFamily: "'SF Pro Display', -apple-system, sans-serif", background: 'linear-gradient(135deg, #6366f1, #a855f7, #ec4899)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            <h1 className="text-[20px] font-bold tracking-tight" style={{ fontFamily: "'SF Pro Display', -apple-system, sans-serif", background: ytBroken ? 'linear-gradient(135deg, #6b7280, #9ca3af)' : 'linear-gradient(135deg, #6366f1, #a855f7, #ec4899)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', transition: 'background 0.3s' }}>
               Automations
             </h1>
-            <BotMascot size={28} />
+            <BotMascot size={28} broken={ytBroken} onClick={reconnect} />
+            {ytBroken && (
+              <button type="button" onClick={reconnect} className="text-[11px] font-semibold text-[#f87171] cursor-pointer hover:text-[#fca5a5]" style={{ background: 'transparent', border: 'none' }}>
+                Disconnected - tap to reconnect
+              </button>
+            )}
           </div>
-          <Link
-            href="/automations/new"
-            className="px-4 py-2 rounded-full text-[12px] font-semibold text-white transition-all hover:scale-105"
-            style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
-          >
-            + New
-          </Link>
+          <div className="flex items-center gap-2">
+            {syncMsg && <span className="text-[11px] text-[#888]">{syncMsg}</span>}
+            <button
+              type="button"
+              onClick={() => runSync(true)}
+              disabled={syncing}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-full text-[12px] font-semibold text-[#ccc] transition-all hover:text-white hover:bg-[#1e1e1e] disabled:opacity-50"
+              style={{ background: '#141414', border: '1px solid #262626' }}
+              title="Check for new likes and emails now"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={syncing ? 'animate-spin' : ''}>
+                <path d="M23 4v6h-6M1 20v-6h6" /><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
+              </svg>
+              {syncing ? 'Syncing...' : 'Sync now'}
+            </button>
+            <Link
+              href="/automations/new"
+              className="px-4 py-2 rounded-full text-[12px] font-semibold text-white transition-all hover:scale-105"
+              style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
+            >
+              + New
+            </Link>
+          </div>
         </div>
 
       </header>
 
       {/* Content */}
-      <div className="px-5 sm:px-8 py-4">
+      <div className="px-5 sm:px-8 py-4 max-w-3xl mx-auto w-full" style={{ filter: ytBroken ? 'grayscale(1)' : 'none', opacity: ytBroken ? 0.5 : 1, transition: 'filter 0.3s, opacity 0.3s' }}>
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <div className="w-8 h-8 rounded-full border-2 border-[#333] border-t-[#888] animate-spin" />
@@ -229,31 +335,42 @@ export default function AutomationsPage() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="text-[9px] uppercase tracking-wider text-white font-semibold leading-none">Then</p>
+                          {auto.action_integration_type === 'hue' ? (() => {
+                            const hueCfg = (auto.action_config || {}) as Record<string, string>;
+                            const dot = colorHexOf(String(hueCfg.color || 'red'));
+                            const suffix = hueSummary(auto.action_type, hueCfg);
+                            return (
+                              <p className="text-[10px] text-[#888] truncate leading-tight mt-0.5 flex items-center gap-1">
+                                <span className="truncate">color</span>
+                                {dot && (
+                                  <span
+                                    className="inline-block rounded-full flex-shrink-0 animate-pulse"
+                                    style={{ width: 7, height: 7, background: dot, boxShadow: `0 0 6px ${dot}` }}
+                                  />
+                                )}
+                                {suffix && <span className="truncate">{suffix}</span>}
+                              </p>
+                            );
+                          })() : (
                           <p className="text-[10px] text-[#888] truncate leading-tight mt-0.5 flex items-center gap-1">
                             <span className="truncate">
                               {prettyAction(auto.action_type)}
-                              {actionCfg.filter(([, v]) => !HEX_RE.test(String(v))).length > 0 && (
-                                <> - {actionCfg.filter(([, v]) => !HEX_RE.test(String(v))).map(([, v]) => String(v)).join(', ')}</>
+                              {actionCfg.filter(([, v]) => !colorHexOf(String(v))).length > 0 && (
+                                <> - {actionCfg.filter(([, v]) => !colorHexOf(String(v))).map(([, v]) => String(v)).join(', ')}</>
                               )}
                             </span>
-                            {actionCfg.filter(([, v]) => HEX_RE.test(String(v))).map(([, v]) => {
-                              const c = String(v);
-                              const isHue = auto.action_integration_type === 'hue';
+                            {actionCfg.filter(([, v]) => colorHexOf(String(v))).map(([, v]) => {
+                              const c = colorHexOf(String(v))!;
                               return (
                                 <span
-                                  key={c}
-                                  className={`inline-block rounded-full flex-shrink-0${isHue ? ' animate-pulse' : ''}`}
-                                  style={{ width: 7, height: 7, background: c, boxShadow: isHue ? `0 0 6px ${c}` : 'none' }}
+                                  key={String(v)}
+                                  className="inline-block rounded-full flex-shrink-0"
+                                  style={{ width: 7, height: 7, background: c, boxShadow: 'none' }}
                                 />
                               );
                             })}
-                            {auto.action_type === 'hue_flash' && !actionCfg.some(([, v]) => HEX_RE.test(String(v))) && (
-                              <span
-                                className="inline-block rounded-full flex-shrink-0 animate-pulse"
-                                style={{ width: 7, height: 7, background: '#facc15', boxShadow: '0 0 6px #facc15' }}
-                              />
-                            )}
                           </p>
+                          )}
                         </div>
                       </div>
                     </div>

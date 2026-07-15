@@ -13,6 +13,19 @@ export function setOAuthToken(token) {
   oauthToken = token;
 }
 
+// Quota circuit-breaker: YouTube's daily quota resets at midnight Pacific.
+// On a 403 quotaExceeded we pause all likes checks until the next reset instead
+// of hammering the API (and logging a 403) every tick.
+let quotaBlockedUntil = 0;
+
+function nextQuotaReset() {
+  const now = new Date();
+  const reset = new Date(now);
+  reset.setUTCHours(7, 15, 0, 0); // ~00:15 PT, just past the daily reset
+  if (reset.getTime() <= now.getTime()) reset.setUTCDate(reset.getUTCDate() + 1);
+  return reset.getTime();
+}
+
 function loadHistory() {
   try {
     return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'));
