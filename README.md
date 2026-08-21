@@ -2,6 +2,9 @@
 
 # Automations
 
+<p align="center"><img src="docs/hero.png" alt="automations" width="100%"></p>
+
+
 Visual node-graph automation flow builder - drag trigger and action nodes onto a React Flow canvas, wire them with gradient edges, and a VPS-side pipeline polls, executes, and delivers the output.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -136,3 +139,9 @@ MIT - see [LICENSE](LICENSE).
 
 Built by [Bunlong Heng](https://www.bunlongheng.com) | [GitHub](https://github.com/bunlongheng/automations)
 </content>
+
+---
+
+<p align="center">
+  <sub>Built by <a href="https://bunlongheng.com">Bunlong Heng</a> &middot; <a href="https://bunlongheng.com/projects/automations">See it in my portfolio &rarr;</a></sub>
+</p>
