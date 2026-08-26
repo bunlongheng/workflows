@@ -1,3 +1,13 @@
+<div align="center">
+  <img src="docs/icon.png" alt="Automations" width="96" height="96" />
+  <h1>Automations</h1>
+  <p><em>An AI automation platform: describe a trigger-to-action in plain text and Claude wires it</em></p>
+  <p><a href="https://github.com/bunlongheng/automations">Repo</a> &middot; <a href="https://bunlongheng.com/projects?name=automations">Portfolio</a></p>
+  <img src="docs/social-preview.png" alt="Automations - preview" width="820" />
+</div>
+
+---
+
 # Automations - Visual Automation Builder
 
 Drag-and-drop visual automation builder with a node-based graph editor for designing automation flows.
