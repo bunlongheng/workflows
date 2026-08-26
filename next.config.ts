@@ -18,6 +18,7 @@ const csp = [
   "connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com https://api.anthropic.com",
   "frame-src 'self' https://accounts.google.com https://www.youtube.com",
   "worker-src 'self' blob:",
+  "manifest-src 'self'",
   // No upgrade-insecure-requests / HSTS: this app is served over plain HTTP
   // on the LAN + Tailscale IPs (no TLS on :3008). Those directives would force
   // asset requests to https and break rendering on any non-localhost client.
