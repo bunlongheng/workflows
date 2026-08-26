@@ -29,12 +29,5 @@ export default defineConfig({
     url: 'http://localhost:3008/automations',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
-    env: {
-      // Dummy public Supabase values so the client-only /auth/callback page
-      // can construct a browser client without throwing. No real auth happens
-      // in E2E - these are placeholders, not secrets, and all /api/** is mocked.
-      NEXT_PUBLIC_SUPABASE_URL: 'http://localhost:54321',
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'e2e-anon-key-placeholder',
-    },
   },
 });

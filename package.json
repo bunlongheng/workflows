@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev --port 3008",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3008 -H 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
@@ -17,8 +17,6 @@
     "test:all": "vitest run && playwright test"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.10.3",
-    "@supabase/supabase-js": "^2.105.4",
     "@xyflow/react": "^12.3.6",
     "motion": "^12.38.0",
     "next": "^16.2.6",

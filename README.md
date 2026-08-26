@@ -82,7 +82,7 @@ flowchart LR
 | UI | React 19, Tailwind CSS, `motion` |
 | Language | TypeScript |
 | Graph editor | `@xyflow/react` (React Flow) |
-| Auth | Supabase (`@supabase/ssr`) + Google/GitHub OAuth |
+| OAuth | Google + GitHub (per-integration connections: YouTube/Gmail/Calendar/GitHub) |
 | Backend pipeline | Node.js + Express, `pg` (Postgres), on a separate VPS process |
 | AI | Anthropic Claude API - transcript summarization and Mermaid diagram generation |
 | Automation surface | Model Context Protocol server (`@modelcontextprotocol/sdk`) |
@@ -120,7 +120,6 @@ Copy `.env.example` to `.env.local`. Required vars:
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - OAuth for YouTube, Gmail, Calendar
 - `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` - GitHub OAuth
 - `ANTHROPIC_API_KEY` - Claude API for transcript summarization and diagram generation
-- `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Supabase auth
 - `VPS_URL` / `VPS_AUTH_TOKEN` - the automations pipeline backend
 - `STICKIES_URL` / `STICKIES_TOKEN` - Stickies API for posted summaries
 - `NEXT_PUBLIC_APP_URL` - public app URL (OAuth callbacks, MCP)
@@ -134,7 +133,7 @@ automations/
   app/              # Next.js App Router - pages + API routes (auth, automations, connections, youtube, gmail, events)
   components/       # FlowCanvas, node/edge types, panels, sidebar, connections + mobile wizard
   data/             # integrations.ts - trigger/action catalog for all 12 integrations
-  lib/              # Supabase client/server, OAuth state, VPS client helpers
+  lib/              # OAuth state, VPS client helpers
   server/           # standalone Express app - poll loop, YouTube pipeline, Postgres writes (deployed to VPS)
   mcp/              # MCP server exposing automations as agent tools
   types/            # shared Automation type
